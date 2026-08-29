@@ -2,9 +2,11 @@
 
 
 #include "GA_GuAbility.h"
-
+#include "Gu_Projectile.h"
 #include "AS_GuMasterAttributeSet.h"
 #include "UGuDefinition.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 
 UGA_GuAbility::UGA_GuAbility()
 {
@@ -30,6 +32,7 @@ UGuDefinition* UGA_GuAbility::GetGuDefinition(
 
 	return Cast<UGuDefinition>(Spec->SourceObject.Get());
 }
+
 void UGA_GuAbility::ActivateAbility(
 	const FGameplayAbilitySpecHandle Handle,
 	const FGameplayAbilityActorInfo* ActorInfo,
@@ -42,7 +45,7 @@ void UGA_GuAbility::ActivateAbility(
 		ActivationInfo,
 		TriggerEventData
 	);
-
+	UE_LOG(LogTemp, Warning, TEXT("UGA_GuAbility::ActivateAbility entered"));
 	UGuDefinition* GuDefinition = GetGuDefinition(Handle, ActorInfo);
 
 	if (!GuDefinition)
@@ -58,30 +61,105 @@ void UGA_GuAbility::ActivateAbility(
 		return;
 	}
 
-	if (!CommitAbility(
-		Handle,
-		ActorInfo,
-		ActivationInfo))
+	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
 	{
-		EndAbility(
-			Handle,
-			ActorInfo,
-			ActivationInfo,
-			true,
-			true
-		);
-
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
 	}
 
+	const FGuProjectileMechanic* ProjectileMechanic = nullptr;
+
+	for (const TInstancedStruct<FGuMechanic>& Mechanic : GuDefinition->Mechanics)
+	{
+		if (const FGuProjectileMechanic* ProjectileData =
+			Mechanic.GetPtr<FGuProjectileMechanic>())
+		{
+			ProjectileMechanic = ProjectileData;
+			break;
+		}
+	}
+
+	if (!ProjectileMechanic)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("%s has no FGuProjectileMechanic"),
+			*GuDefinition->Name.ToString()
+		);
+
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	if (!ProjectileMechanic->ProjectileClass)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("Projectile mechanic has no ProjectileClass assigned")
+		);
+
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	AActor* Avatar = ActorInfo->AvatarActor.Get();
+
+	if (!Avatar)
+	{
+		UE_LOG(LogTemp, Error, TEXT("No AvatarActor"));
+
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	const FVector SpawnLocation =
+		Avatar->GetActorLocation()
+		+ Avatar->GetActorForwardVector() * 100.0f;
+
+	const FTransform SpawnTransform(
+		Avatar->GetActorRotation(),
+		SpawnLocation
+	);
+
+	AGu_Projectile* SpawnedProjectile =
+		GetWorld()->SpawnActorDeferred<AGu_Projectile>(
+			ProjectileMechanic->ProjectileClass,
+			SpawnTransform,
+			Avatar,
+			Cast<APawn>(Avatar),
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn
+		);
+
+	if (!SpawnedProjectile)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SpawnActorDeferred failed"));
+
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	SpawnedProjectile->FinishSpawning(SpawnTransform);
+
+	SpawnedProjectile->InitializeProjectile(
+		*ProjectileMechanic,
+		GuDefinition,
+		ActorInfo->AbilitySystemComponent.Get()
+	);
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Projectile spawned: %s"),
+		*SpawnedProjectile->GetName()
+	);
 	UE_LOG(
 		LogTemp,
 		Warning,
 		TEXT("Activated Gu: %s"),
 		*GuDefinition->Name.ToString()
 	);
-
-	// Actual Gu mechanics go here later.
 
 	EndAbility(
 		Handle,

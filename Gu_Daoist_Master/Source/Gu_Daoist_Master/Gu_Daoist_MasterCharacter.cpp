@@ -101,6 +101,15 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 		AttributeSet->GetPrimevalEssence(),
 		AttributeSet->GetMaxPrimevalEssence()
 	);
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Gu setup — Authority: %s, Ability: %s, Definition: %s"),
+		HasAuthority() ? TEXT("true") : TEXT("false"),
+		*GetNameSafe(GuAbilityClass),
+		*GetNameSafe(TestGuDefinition)
+	);
+
 	if (HasAuthority() && GuAbilityClass && TestGuDefinition)
 	{
 		FGameplayAbilitySpec AbilitySpec(
@@ -110,12 +119,19 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 			TestGuDefinition
 		);
 
-		FGameplayAbilitySpecHandle AbilityHandle =
+		const FGameplayAbilitySpecHandle AbilityHandle =
 			AbilitySystemComponent->GiveAbility(AbilitySpec);
 
-		AbilitySystemComponent->TryActivateAbility(AbilityHandle);
-	}
+		const bool bActivated =
+			AbilitySystemComponent->TryActivateAbility(AbilityHandle);
 
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("TryActivateAbility returned: %s"),
+			bActivated ? TEXT("true") : TEXT("false")
+		);
+	}
 }
 
 

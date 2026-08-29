@@ -26,4 +26,18 @@ void UAS_GuMasterAttributeSet::PreAttributeChange(const FGameplayAttribute& Attr
     {
         NewValue = FMath::Max(NewValue, 0.0f);
     }
+
+    if (Attribute == GetHealthAttribute())
+    {
+        NewValue = FMath::Clamp(
+            NewValue,
+            0.0f,
+            GetMaxHealth()
+        );
+    }
+
+    if (Attribute == GetMaxHealthAttribute())
+    {
+        NewValue = FMath::Max(NewValue, 0.0f);
+    }
 }

@@ -10,6 +10,7 @@
 #include "UGuDefinition.generated.h"
 
 
+class AGu_Projectile;
 class UGameplayEffect;
 
 
@@ -34,6 +35,9 @@ USTRUCT(BlueprintType)
 struct FGuProjectileMechanic : public FGuMechanic
 {
 	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSubclassOf<AGu_Projectile> ProjectileClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	float Speed = 1500.0f;

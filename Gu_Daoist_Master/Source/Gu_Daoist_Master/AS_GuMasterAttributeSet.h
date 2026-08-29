@@ -40,4 +40,14 @@ public:
     FGameplayAttributeData MaxPrimevalEssence;
 
     ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, MaxPrimevalEssence)
+
+        UPROPERTY(BlueprintReadOnly, Category = "Attributes|Health")
+    FGameplayAttributeData Health;
+
+    ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, Health)
+
+        UPROPERTY(BlueprintReadOnly, Category = "Attributes|Health")
+    FGameplayAttributeData MaxHealth;
+
+    ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, MaxHealth)
 };
