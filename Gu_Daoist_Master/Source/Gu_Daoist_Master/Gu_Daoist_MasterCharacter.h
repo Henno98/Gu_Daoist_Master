@@ -7,6 +7,7 @@
 #include "AS_GuMasterAttributeSet.h"
 #include "GameFramework/Character.h"
 #include "Logging/LogMacros.h"
+
 #include "Gu_Daoist_MasterCharacter.generated.h"
 
 class UInputComponent;
@@ -15,6 +16,9 @@ class UCameraComponent;
 class UInputAction;
 struct FInputActionValue;
 class UGameplayEffect;
+class UGameplayAbility;
+
+class UGuDefinition;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
@@ -67,6 +71,13 @@ public:
 
 	UPROPERTY()
 	TObjectPtr<UAS_GuMasterAttributeSet> AttributeSet;
+
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gu")
+	TSubclassOf<UGameplayAbility> GuAbilityClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gu")
+	TObjectPtr<UGuDefinition> TestGuDefinition;
 
 protected:
 

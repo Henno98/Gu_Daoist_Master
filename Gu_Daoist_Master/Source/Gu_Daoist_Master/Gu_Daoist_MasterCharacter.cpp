@@ -9,6 +9,8 @@
 #include "InputActionValue.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "AbilitySystemInterface.h"
+#include "GameplayAbilitySpec.h"
+#include "UGuDefinition.h"
 #include "AbilitySystemComponent.h"
 #include "Gu_Daoist_Master.h"
 
@@ -69,6 +71,8 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(this, this);
 	}
+
+
 	if (InitialAttributesEffect)
 	{
 		FGameplayEffectContextHandle EffectContext =
@@ -97,6 +101,21 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 		AttributeSet->GetPrimevalEssence(),
 		AttributeSet->GetMaxPrimevalEssence()
 	);
+	if (HasAuthority() && GuAbilityClass && TestGuDefinition)
+	{
+		FGameplayAbilitySpec AbilitySpec(
+			GuAbilityClass,
+			1,
+			INDEX_NONE,
+			TestGuDefinition
+		);
+
+		FGameplayAbilitySpecHandle AbilityHandle =
+			AbilitySystemComponent->GiveAbility(AbilitySpec);
+
+		AbilitySystemComponent->TryActivateAbility(AbilityHandle);
+	}
+
 }
 
 

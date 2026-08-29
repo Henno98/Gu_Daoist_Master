@@ -9,6 +9,10 @@
 
 #include "UGuDefinition.generated.h"
 
+
+class UGameplayEffect;
+
+
 USTRUCT(BlueprintType)
 struct FGuMechanic
 {
@@ -23,6 +27,31 @@ struct FGuEssenceCostMechanic : public FGuMechanic
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gu")
 	float Cost = 0.0f;
+
+
+};
+USTRUCT(BlueprintType)
+struct FGuProjectileMechanic : public FGuMechanic
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float Speed = 1500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float MaxRange = 1000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float Radius = 10.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FGuDamageMechanic : public FGuMechanic
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+	float Damage = 10.0f;
 };
 
 UCLASS(BlueprintType)
@@ -46,4 +75,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Mechanics")
 	TArray<TInstancedStruct<FGuMechanic>> Mechanics;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gu")
+	TSubclassOf<UGameplayEffect> PrimevalEssenceCostEffect;
 };
