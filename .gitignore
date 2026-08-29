@@ -30,3 +30,118 @@
 *.exe
 *.out
 *.app
+
+# ==============================
+# Unreal Engine 5
+# ==============================
+
+# Visual Studio / IDE
+.vs/
+.vscode/
+.idea/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userprefs
+
+# Visual Studio generated files
+*.sln
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# Unreal generated build folders
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Local Unreal cache
+LocalDerivedDataCache/
+
+# Packaged / staged builds
+StagedBuilds/
+
+# Unreal generated project files
+*.xcodeproj
+*.xcworkspace
+
+# Unreal autosaves / backups
+Autosaves/
+Backup/
+
+# ==============================
+# Plugins
+# ==============================
+
+# Ignore generated plugin files,
+# but keep plugin source/config/content.
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+Plugins/**/DerivedDataCache/
+Plugins/**/Saved/
+
+# ==============================
+# Compiled / generated C++
+# ==============================
+
+# Prerequisites
+*.d
+
+# Compiled object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled headers
+*.gch
+*.pch
+
+# Compiled dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Debug symbols / build artifacts
+*.pdb
+*.ilk
+*.exp
+*.iobj
+*.ipdb
+
+# ==============================
+# Operating system junk
+# ==============================
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+# ==============================
+# Logs / temporary files
+# ==============================
+
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
