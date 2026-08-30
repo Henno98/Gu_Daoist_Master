@@ -9,6 +9,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GameplayEffect.h"
 #include "AbilitySystemComponent.h"
+#include "GuExecutionLibrary.h"
 #include "Components/SphereComponent.h"
 
 #include "GameFramework/ProjectileMovementComponent.h"
@@ -17,8 +18,7 @@
 AGu_Projectile::AGu_Projectile()
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
-
+	PrimaryActorTick.bCanEverTick = false;
 
 	Collision = CreateDefaultSubobject<USphereComponent>(
 		TEXT("Collision")
@@ -31,42 +31,76 @@ AGu_Projectile::AGu_Projectile()
 			TEXT("ProjectileMovement")
 		);
 
-	Collision->SetCollisionEnabled(
-		ECollisionEnabled::QueryOnly
-	);
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Collision->SetCollisionObjectType(ECC_WorldDynamic);
 
-	Collision->SetCollisionResponseToAllChannels(
-		ECR_Ignore
-	);
+	Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Collision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 
-	Collision->SetCollisionResponseToChannel(
-		ECC_Pawn,
-		ECR_Overlap
-	);
+	Collision->SetGenerateOverlapEvents(false);
 
-	Collision->OnComponentBeginOverlap.AddDynamic(
+	Collision->OnComponentHit.AddDynamic(
 		this,
-		&AGu_Projectile::OnProjectileOverlap
+		&AGu_Projectile::OnProjectileHit
 	);
+
+	ProjectileMovement->UpdatedComponent = Collision;
+	ProjectileMovement->bSweepCollision = true;
 
 	ProjectileMovement->InitialSpeed = 1500.0f;
 	ProjectileMovement->MaxSpeed = 1500.0f;
 	ProjectileMovement->bRotationFollowsVelocity = true;
-	ProjectileMovement->bShouldBounce = true;
+
+	// We want impact, not Unreal pinball.
+	ProjectileMovement->bShouldBounce = false;
+
+	ProjectileMovement->ProjectileGravityScale = 0.0f;
 }
 
 void AGu_Projectile::InitializeProjectile(const FGuProjectileMechanic& ProjectileData, UGuDefinition* InGuDefinition,
 	UAbilitySystemComponent* InSourceASC)
 {
+	if (!InGuDefinition)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("InitializeProjectile: InGuDefinition is null"));
+
+		Destroy();
+		return;
+	}
+
+	if (!InSourceASC)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("InitializeProjectile: InSourceASC is null"));
+
+		Destroy();
+		return;
+	}
+
 	GuDefinition = InGuDefinition;
 	SourceASC = InSourceASC;
 
 	MaxRange = ProjectileData.MaxRange;
 	SpawnLocation = GetActorLocation();
 
+	// Enforce runtime collision settings.
+	// This prevents Blueprint defaults from overriding our native setup.
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Collision->SetCollisionObjectType(ECC_WorldDynamic);
+
+	Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Collision->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+
+	Collision->SetGenerateOverlapEvents(false);
+
 	Collision->SetSphereRadius(
 		ProjectileData.Radius
 	);
+
+	ProjectileMovement->UpdatedComponent = Collision;
 
 	ProjectileMovement->InitialSpeed =
 		ProjectileData.Speed;
@@ -77,92 +111,98 @@ void AGu_Projectile::InitializeProjectile(const FGuProjectileMechanic& Projectil
 	ProjectileMovement->Velocity =
 		GetActorForwardVector() * ProjectileData.Speed;
 
+	ProjectileMovement->ProjectileGravityScale =
+		ProjectileData.GravityScale;
+
+	ProjectileMovement->bSweepCollision = true;
+	ProjectileMovement->bShouldBounce = false;
+
 	if (ProjectileData.Speed > 0.0f &&
 		ProjectileData.MaxRange > 0.0f)
 	{
 		const float Lifetime =
-			ProjectileData.MaxRange / ProjectileData.Speed;
+			ProjectileData.MaxRange /
+			ProjectileData.Speed;
 
-		SetLifeSpan(15);
+		SetLifeSpan(Lifetime);
 	}
 
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT(
+			"Projectile initialized — Speed: %.1f, Range: %.1f, "
+			"Lifetime: %.2f, PawnResponse: %d"
+		),
+		ProjectileData.Speed,
+		ProjectileData.MaxRange,
+		GetLifeSpan(),
+		static_cast<int32>(
+			Collision->GetCollisionResponseToChannel(ECC_Pawn)
+			)
+	);
 }
 
-void AGu_Projectile::OnProjectileOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+
+
+void AGu_Projectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
+	if (!OtherActor)
+	{
+		Destroy();
+		return;
+	}
 
-		if (!OtherActor ||
-			OtherActor == GetOwner() ||
-			!GuDefinition ||
-			!SourceASC)
-		{
-			return;
-		}
+	if (OtherActor == this || OtherActor == GetOwner())
+	{
+		return;
+	}
 
-		UAbilitySystemComponent* TargetASC =
-			UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(
-				OtherActor
-			);
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Projectile hit fired — Actor: %s, Component: %s"),
+		*GetNameSafe(OtherActor),
+		*GetNameSafe(OtherComp)
+	);
 
-		if (!TargetASC)
-		{
-			return;
-		}
-
-		const FGuDamageMechanic* DamageMechanic = nullptr;
-
-		for (const TInstancedStruct<FGuMechanic>& Mechanic :
-			GuDefinition->Mechanics)
-		{
-			if (const FGuDamageMechanic* DamageData =
-				Mechanic.GetPtr<FGuDamageMechanic>())
-			{
-				DamageMechanic = DamageData;
-				break;
-			}
-		}
-
-		if (!DamageMechanic || !DamageEffect)
-		{
-			return;
-		}
-
-		FGameplayEffectContextHandle EffectContext =
-			SourceASC->MakeEffectContext();
-
-		EffectContext.AddSourceObject(this);
-
-		FGameplayEffectSpecHandle DamageSpec =
-			SourceASC->MakeOutgoingSpec(
-				DamageEffect,
-				1.0f,
-				EffectContext
-			);
-
-		if (!DamageSpec.IsValid())
-		{
-			return;
-		}
-
-		const FGameplayTag DamageTag =
-			FGameplayTag::RequestGameplayTag(
-				FName("Data.Gu.Damage")
-			);
-
-		DamageSpec.Data->SetSetByCallerMagnitude(
-			DamageTag,
-			-DamageMechanic->Damage
-		);
-
-		SourceASC->ApplyGameplayEffectSpecToTarget(
-			*DamageSpec.Data.Get(),
-			TargetASC
+	if (!GuDefinition)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("%s has no GuDefinition"),
+			*GetName()
 		);
 
 		Destroy();
-	
+		return;
+	}
+
+	if (!SourceASC)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("%s has no SourceASC"),
+			*GetName()
+		);
+
+		Destroy();
+		return;
+	}
+
+	UGuExecutionLibrary::ExecuteImpact(
+		GuDefinition,
+		SourceASC,
+		OtherActor
+	);
+
+
+	Destroy();
 }
+
 
 // Called when the game starts or when spawned
 void AGu_Projectile::BeginPlay()

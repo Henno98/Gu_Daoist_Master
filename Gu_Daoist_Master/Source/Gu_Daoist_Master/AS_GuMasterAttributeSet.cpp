@@ -2,6 +2,7 @@
 
 
 #include "AS_GuMasterAttributeSet.h"
+#include "GameplayEffectExtension.h"
 
 UAS_GuMasterAttributeSet::UAS_GuMasterAttributeSet()
 {
@@ -40,4 +41,41 @@ void UAS_GuMasterAttributeSet::PreAttributeChange(const FGameplayAttribute& Attr
     {
         NewValue = FMath::Max(NewValue, 0.0f);
     }
+}
+
+void UAS_GuMasterAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallbackData& Data)
+{
+	Super::PostGameplayEffectExecute(Data);
+
+	if (Data.EvaluatedData.Attribute == GetHealthAttribute())
+	{
+		SetHealth(
+			FMath::Clamp(
+				GetHealth(),
+				0.0f,
+				GetMaxHealth()
+			)
+		);
+
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Health after effect: %.1f / %.1f"),
+			GetHealth(),
+			GetMaxHealth()
+		);
+	}
+	else if (
+		Data.EvaluatedData.Attribute ==
+		GetPrimevalEssenceAttribute()
+		)
+	{
+		SetPrimevalEssence(
+			FMath::Clamp(
+				GetPrimevalEssence(),
+				0.0f,
+				GetMaxPrimevalEssence()
+			)
+		);
+	}
 }

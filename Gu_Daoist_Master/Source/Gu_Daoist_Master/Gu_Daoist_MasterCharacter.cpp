@@ -14,6 +14,53 @@
 #include "AbilitySystemComponent.h"
 #include "Gu_Daoist_Master.h"
 
+void AGu_Daoist_MasterCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->InitAbilityActorInfo(this, this);
+	}
+
+	if (HasAuthority() && InitialAttributesEffect)
+	{
+		FGameplayEffectContextHandle EffectContext =
+			AbilitySystemComponent->MakeEffectContext();
+
+		EffectContext.AddSourceObject(this);
+
+		FGameplayEffectSpecHandle SpecHandle =
+			AbilitySystemComponent->MakeOutgoingSpec(
+				InitialAttributesEffect,
+				1.0f,
+				EffectContext
+			);
+
+		if (SpecHandle.IsValid())
+		{
+			AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(
+				*SpecHandle.Data.Get()
+			);
+		}
+	}
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Primeval Essence: %.1f / %.1f"),
+		AttributeSet->GetPrimevalEssence(),
+		AttributeSet->GetMaxPrimevalEssence()
+	);
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("Gu setup — Authority: %s, Ability: %s, Definition: %s"),
+		HasAuthority() ? TEXT("true") : TEXT("false"),
+		*GetNameSafe(GuAbilityClass),
+		*GetNameSafe(TestGuDefinition)
+	);
+}
+
 AGu_Daoist_MasterCharacter::AGu_Daoist_MasterCharacter()
 {
 	// Set size for collision capsule
@@ -63,52 +110,47 @@ UAbilitySystemComponent* AGu_Daoist_MasterCharacter::GetAbilitySystemComponent()
 	return AbilitySystemComponent;
 }
 
+void AGu_Daoist_MasterCharacter::ActivateTestGu(const FInputActionValue& Value)
+{
+	if (!AbilitySystemComponent)
+	{
+		return;
+	}
+
+	if (!TestGuAbilityHandle.IsValid())
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("Test Gu ability handle is invalid")
+		);
+
+		return;
+	}
+
+	const bool bActivated =
+		AbilitySystemComponent->TryActivateAbility(
+			TestGuAbilityHandle
+		);
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("TryActivateAbility returned: %s"),
+		bActivated ? TEXT("true") : TEXT("false")
+	);
+}
+
 void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 
+	
 	if (AbilitySystemComponent)
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(this, this);
 	}
 
-
-	if (InitialAttributesEffect)
-	{
-		FGameplayEffectContextHandle EffectContext =
-			AbilitySystemComponent->MakeEffectContext();
-
-		EffectContext.AddSourceObject(this);
-
-		FGameplayEffectSpecHandle SpecHandle =
-			AbilitySystemComponent->MakeOutgoingSpec(
-				InitialAttributesEffect,
-				1.0f,
-				EffectContext
-			);
-
-		if (SpecHandle.IsValid())
-		{
-			AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(
-				*SpecHandle.Data.Get()
-			);
-		}
-	}
-	UE_LOG(
-		LogTemp,
-		Warning,
-		TEXT("Primeval Essence: %.1f / %.1f"),
-		AttributeSet->GetPrimevalEssence(),
-		AttributeSet->GetMaxPrimevalEssence()
-	);
-	UE_LOG(
-		LogTemp,
-		Warning,
-		TEXT("Gu setup — Authority: %s, Ability: %s, Definition: %s"),
-		HasAuthority() ? TEXT("true") : TEXT("false"),
-		*GetNameSafe(GuAbilityClass),
-		*GetNameSafe(TestGuDefinition)
-	);
 
 	if (HasAuthority() && GuAbilityClass && TestGuDefinition)
 	{
@@ -116,20 +158,19 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 			GuAbilityClass,
 			1,
 			INDEX_NONE,
-			TestGuDefinition
+			TestGuDefinition.Get()
 		);
 
-		const FGameplayAbilitySpecHandle AbilityHandle =
+		TestGuAbilityHandle =
 			AbilitySystemComponent->GiveAbility(AbilitySpec);
-
-		const bool bActivated =
-			AbilitySystemComponent->TryActivateAbility(AbilityHandle);
 
 		UE_LOG(
 			LogTemp,
 			Warning,
-			TEXT("TryActivateAbility returned: %s"),
-			bActivated ? TEXT("true") : TEXT("false")
+			TEXT("Gu setup — Authority: %s, Ability: %s, Definition: %s"),
+			HasAuthority() ? TEXT("true") : TEXT("false"),
+			*GetNameSafe(GuAbilityClass),
+			*GetNameSafe(TestGuDefinition)
 		);
 	}
 }
@@ -150,6 +191,16 @@ void AGu_Daoist_MasterCharacter::SetupPlayerInputComponent(UInputComponent* Play
 		// Looking/Aiming
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AGu_Daoist_MasterCharacter::LookInput);
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AGu_Daoist_MasterCharacter::LookInput);
+
+		if (ActivateGuAction)
+		{
+			EnhancedInputComponent->BindAction(
+				ActivateGuAction,
+				ETriggerEvent::Started,
+				this,
+				&AGu_Daoist_MasterCharacter::ActivateTestGu
+			);
+		}
 	}
 	else
 	{

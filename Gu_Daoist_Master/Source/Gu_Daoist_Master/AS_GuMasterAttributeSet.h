@@ -8,6 +8,8 @@
 #include "AS_GuMasterAttributeSet.generated.h"
 
 
+struct FGameplayEffectModCallbackData;
+
 #define ATTRIBUTE_ACCESSORS(ClassName, PropertyName) \
     GAMEPLAYATTRIBUTE_PROPERTY_GETTER(ClassName, PropertyName) \
     GAMEPLAYATTRIBUTE_VALUE_GETTER(PropertyName) \
@@ -30,24 +32,32 @@ public:
         float& NewValue
     ) override;
 
+    virtual void PostGameplayEffectExecute(
+        const FGameplayEffectModCallbackData& Data
+    ) override;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Gu|Essence")
+    UPROPERTY(VisibleAnywhere,BlueprintReadOnly, Category = "Gu|Essence")
     FGameplayAttributeData PrimevalEssence;
 
     ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, PrimevalEssence)
 
-    UPROPERTY(BlueprintReadOnly, Category = "Gu|Essence")
+        UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Gu|Essence")
     FGameplayAttributeData MaxPrimevalEssence;
 
     ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, MaxPrimevalEssence)
 
-        UPROPERTY(BlueprintReadOnly, Category = "Attributes|Health")
+	UPROPERTY(VisibleAnywhere,BlueprintReadOnly, Category = "Attributes|Health")
     FGameplayAttributeData Health;
 
     ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, Health)
 
-        UPROPERTY(BlueprintReadOnly, Category = "Attributes|Health")
+	UPROPERTY(VisibleAnywhere,BlueprintReadOnly, Category = "Attributes|Health")
     FGameplayAttributeData MaxHealth;
 
     ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, MaxHealth)
+
+	UPROPERTY(VisibleAnywhere,BlueprintReadOnly, Category = "Attributes|Defense")
+    FGameplayAttributeData Defense;
+
+    ATTRIBUTE_ACCESSORS(UAS_GuMasterAttributeSet, Defense)
 };

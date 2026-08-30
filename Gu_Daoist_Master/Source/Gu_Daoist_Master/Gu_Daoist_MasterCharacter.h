@@ -43,6 +43,9 @@ class AGu_Daoist_MasterCharacter : public ACharacter, public IAbilitySystemInter
 
 protected:
 
+protected:
+	virtual void BeginPlay() override;
+
 	/** Jump Input Action */
 	UPROPERTY(EditAnywhere, Category ="Input")
 	UInputAction* JumpAction;
@@ -59,10 +62,16 @@ protected:
 	UPROPERTY(EditAnywhere, Category ="Input")
 	class UInputAction* MouseLookAction;
 	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> ActivateGuAction;
+
+	FGameplayAbilitySpecHandle TestGuAbilityHandle;
 public:
 	AGu_Daoist_MasterCharacter();
 
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+
+	void ActivateTestGu(const FInputActionValue& Value);
 
 	virtual void PossessedBy(AController* NewController) override;
 

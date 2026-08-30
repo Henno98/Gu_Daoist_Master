@@ -47,6 +47,9 @@ struct FGuProjectileMechanic : public FGuMechanic
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	float Radius = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float GravityScale = 0.0f;
 };
 
 USTRUCT(BlueprintType)
@@ -56,6 +59,9 @@ struct FGuDamageMechanic : public FGuMechanic
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
 	float Damage = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
+	TSubclassOf<UGameplayEffect> EffectClass;
 };
 
 UCLASS(BlueprintType)
