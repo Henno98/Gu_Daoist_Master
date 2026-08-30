@@ -12,6 +12,7 @@ struct FGuProjectileMechanic;
 class UProjectileMovementComponent;
 class USphereComponent;
 class UGameplayEffect;
+class UStaticMeshComponent;
 
 UCLASS(Blueprintable)
 class GU_DAOIST_MASTER_API AGu_Projectile : public AActor
@@ -24,6 +25,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	TObjectPtr<USphereComponent> Collision;
+
+	UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category = "Projectile")
+	TObjectPtr<UStaticMeshComponent> VisualMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	TObjectPtr<UProjectileMovementComponent> ProjectileMovement;

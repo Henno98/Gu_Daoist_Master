@@ -14,7 +14,8 @@
 
 class AGu_Projectile;
 class UGameplayEffect;
-
+class UStaticMesh;
+class UMaterialInterface;
 
 USTRUCT(BlueprintType)
 struct FGuMechanic
@@ -46,9 +47,21 @@ struct FGuKnockbackMechanic : public FGuMechanic
 	float VerticalStrength = 0.0f;
 };
 
+
+UENUM(BlueprintType)
+enum class EGuProjectileCollisionType : uint8
+{
+	Sphere,
+	Box,
+	Capsule,
+	Mesh
+};
+
 USTRUCT(BlueprintType)
 struct FGuProjectileMechanic : public FGuMechanic
 {
+
+	
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -65,6 +78,67 @@ struct FGuProjectileMechanic : public FGuMechanic
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	float GravityScale = 0.0f;
+
+
+	// Visuals
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile|Visual")
+	TObjectPtr<UStaticMesh> Mesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile|Visual")
+	TObjectPtr<UMaterialInterface> Material = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile|Visual")
+	FVector MeshScale = FVector(1.0f);
+
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile|Collision")
+	EGuProjectileCollisionType CollisionType =
+		EGuProjectileCollisionType::Sphere;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Projectile|Collision",
+		meta = (
+			EditCondition = "CollisionType == EGuProjectileCollisionType::Sphere",
+			EditConditionHides
+			)
+	)
+	float SphereRadius = 10.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Projectile|Collision",
+		meta = (
+			EditCondition = "CollisionType == EGuProjectileCollisionType::Box",
+			EditConditionHides
+			)
+	)
+	FVector BoxExtent = FVector(10.0f);
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Projectile|Collision",
+		meta = (
+			EditCondition = "CollisionType == EGuProjectileCollisionType::Capsule",
+			EditConditionHides
+			)
+	)
+	float CapsuleRadius = 5.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Projectile|Collision",
+		meta = (
+			EditCondition = "CollisionType == EGuProjectileCollisionType::Capsule",
+			EditConditionHides
+			)
+	)
+	float CapsuleHalfHeight = 20.0f;
 };
 
 USTRUCT(BlueprintType)

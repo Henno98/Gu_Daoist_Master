@@ -9,6 +9,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GameplayEffect.h"
 #include "AbilitySystemComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GuExecutionLibrary.h"
 #include "Components/SphereComponent.h"
 
@@ -30,6 +31,19 @@ AGu_Projectile::AGu_Projectile()
 		CreateDefaultSubobject<UProjectileMovementComponent>(
 			TEXT("ProjectileMovement")
 		);
+
+	VisualMesh =
+		CreateDefaultSubobject<UStaticMeshComponent>(
+			TEXT("VisualMesh")
+		);
+
+	VisualMesh->SetupAttachment(Collision);
+
+	VisualMesh->SetCollisionEnabled(
+		ECollisionEnabled::NoCollision
+	);
+
+	VisualMesh->SetGenerateOverlapEvents(false);
 
 	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Collision->SetCollisionObjectType(ECC_WorldDynamic);
@@ -78,7 +92,13 @@ void AGu_Projectile::InitializeProjectile(const FGuProjectileMechanic& Projectil
 		Destroy();
 		return;
 	}
-
+	if (!ProjectileData.Mesh || !ProjectileData.Material)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("InitializeProjectile: mesh or texture is null"));
+		Destroy();
+		return;
+	}
 	GuDefinition = InGuDefinition;
 	SourceASC = InSourceASC;
 
@@ -98,6 +118,30 @@ void AGu_Projectile::InitializeProjectile(const FGuProjectileMechanic& Projectil
 
 	Collision->SetSphereRadius(
 		ProjectileData.Radius
+	);
+
+
+	if (ProjectileData.Mesh)
+	{
+		VisualMesh->SetStaticMesh(
+			ProjectileData.Mesh
+		);
+	}
+	else
+	{
+		VisualMesh->SetStaticMesh(nullptr);
+	}
+
+	if (ProjectileData.Material)
+	{
+		VisualMesh->SetMaterial(
+			0,
+			ProjectileData.Material
+		);
+	}
+
+	VisualMesh->SetRelativeScale3D(
+		ProjectileData.MeshScale
 	);
 
 	ProjectileMovement->UpdatedComponent = Collision;
