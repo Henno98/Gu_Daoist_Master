@@ -134,7 +134,6 @@ namespace
 		Context.SourceASC->ApplyGameplayEffectSpecToTarget(
 			*DamageSpec.Data.Get(),
 			Context.TargetASC
-
 		);
 
 		UE_LOG(
@@ -372,18 +371,7 @@ namespace
 		Context.SourceASC->ApplyGameplayEffectSpecToSelf(
 			*BuffSpec.Data.Get()
 		);
-		const float CurrentBuffedValue =
-			Context.SourceASC->GetNumericAttribute(
-				Buff->Attribute
-			);
 
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("%s current value after buff: %.1f"),
-			*Buff->Attribute.GetName(),
-			CurrentBuffedValue
-		);
 		UE_LOG(
 			LogTemp,
 			Warning,

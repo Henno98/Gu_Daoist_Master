@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "AttributeSet.h"
+#include "GameplayEffectTypes.h"
 #include "StructUtils/InstancedStruct.h"
 
 
@@ -31,6 +33,19 @@ struct FGuEssenceCostMechanic : public FGuMechanic
 
 
 };
+
+USTRUCT(BlueprintType)
+struct FGuKnockbackMechanic : public FGuMechanic
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knockback")
+	float Strength = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Knockback")
+	float VerticalStrength = 0.0f;
+};
+
 USTRUCT(BlueprintType)
 struct FGuProjectileMechanic : public FGuMechanic
 {
@@ -62,6 +77,25 @@ struct FGuDamageMechanic : public FGuMechanic
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
 	TSubclassOf<UGameplayEffect> EffectClass;
+};
+
+USTRUCT(BlueprintType)
+struct FGuBuffMechanic : public FGuMechanic
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Buff")
+	FGameplayAttribute Attribute;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Buff")
+	TEnumAsByte<EGameplayModOp::Type> Operation =
+		EGameplayModOp::Additive;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Buff")
+	float Magnitude = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Buff")
+	float Duration = 5.0f;
 };
 
 UCLASS(BlueprintType)

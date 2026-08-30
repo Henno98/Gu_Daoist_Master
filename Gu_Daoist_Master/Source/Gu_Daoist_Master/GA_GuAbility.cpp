@@ -6,6 +6,7 @@
 #include "AS_GuMasterAttributeSet.h"
 #include "UGuDefinition.h"
 #include "Engine/World.h"
+#include "GuExecutionLibrary.h"
 #include "GameFramework/Pawn.h"
 
 UGA_GuAbility::UGA_GuAbility()
@@ -66,6 +67,12 @@ void UGA_GuAbility::ActivateAbility(
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
 	}
+	UGuExecutionLibrary::ExecuteActivation(
+		GuDefinition,
+		ActorInfo->AbilitySystemComponent.Get(),
+		ActorInfo->AvatarActor.Get(),
+		GuSystemConfig
+	);
 
 	const FGuProjectileMechanic* ProjectileMechanic = nullptr;
 

@@ -9,6 +9,7 @@
 
 struct FGuEssenceCostMechanic;
 class UGuDefinition;
+class UGuSystemConfig;
 /**
  * 
  */
@@ -45,4 +46,11 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gu")
 	TSubclassOf<UGameplayEffect> PrimevalEssenceCostEffect;
+
+	UPROPERTY(
+		EditDefaultsOnly,
+		BlueprintReadOnly,
+		Category = "Gu|System"
+	)
+	TObjectPtr<UGuSystemConfig> GuSystemConfig;
 };

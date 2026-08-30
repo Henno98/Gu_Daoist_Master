@@ -9,7 +9,8 @@
 
 class UGuDefinition;
 class UAbilitySystemComponent;
-
+struct FHitResult;
+class UGuSystemConfig;
 
 UCLASS()
 class GU_DAOIST_MASTER_API UGuExecutionLibrary : public UBlueprintFunctionLibrary
@@ -21,6 +22,13 @@ public:
 	static bool ExecuteImpact(
 		UGuDefinition* GuDefinition,
 		UAbilitySystemComponent* SourceASC,
-		AActor* TargetActor
+		AActor* TargetActor,
+		const FHitResult& HitResult
+	);
+	static bool ExecuteActivation(
+		UGuDefinition* GuDefinition,
+		UAbilitySystemComponent* SourceASC,
+		AActor* SourceActor,
+		const UGuSystemConfig* SystemConfig
 	);
 };

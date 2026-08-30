@@ -193,12 +193,13 @@ void AGu_Projectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* 
 		return;
 	}
 
-	UGuExecutionLibrary::ExecuteImpact(
-		GuDefinition,
-		SourceASC,
-		OtherActor
-	);
-
+	const bool bExecuted =
+		UGuExecutionLibrary::ExecuteImpact(
+			GuDefinition,
+			SourceASC,
+			OtherActor,
+			Hit
+		);
 
 	Destroy();
 }
