@@ -99,7 +99,7 @@ struct FKillerMoveInputStep
 
     /** Base +/- timing window. Focus Control widens this at runtime. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0.03", ClampMax="2.0"))
-    float TimingWindow = 0.2f;
+    float TimingWindow = 0.4f;
 
     /** If true, missing the window collapses the entire activation. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -108,6 +108,47 @@ struct FKillerMoveInputStep
     /** Pressing this step keeps its Gu under attention until a later Release step. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bHoldAttention = false;
+};
+
+
+/** Concrete mechanic payload compiled from an individual Gu component. */
+UENUM(BlueprintType)
+enum class EKillerMoveConcreteEffectType : uint8
+{
+    ProjectileCarrier,
+    Damage,
+    Knockback,
+    StatModifier,
+    SemanticModifier
+};
+
+USTRUCT(BlueprintType)
+struct FKillerMoveConcreteEffect
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    EKillerMoveConcreteEffectType Type = EKillerMoveConcreteEffectType::SemanticModifier;
+
+    UPROPERTY(BlueprintReadOnly)
+    FName SourceMechanic = NAME_None;
+
+    /** Primary numeric amount: damage, knockback strength, buff magnitude, or carrier speed. */
+    UPROPERTY(BlueprintReadOnly)
+    float Magnitude = 0.0f;
+
+    /** Secondary amount: vertical knockback, duration seconds, or another mechanic-specific value. */
+    UPROPERTY(BlueprintReadOnly)
+    float SecondaryMagnitude = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float Range = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    float Radius = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Detail;
 };
 
 USTRUCT(BlueprintType)
@@ -127,6 +168,10 @@ struct FKillerMoveEffectNode
     FName Branch = NAME_None;
     UPROPERTY(BlueprintReadOnly)
     FName Path = NAME_None;
+
+    /** Actual executable mechanics contributed by this Gu, not merely its semantic role. */
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FKillerMoveConcreteEffect> Effects;
 };
 
 USTRUCT(BlueprintType)
@@ -225,6 +270,11 @@ struct FKillerMovePublicState
     float LastInputOffsetMs = 0.0f;
     UPROPERTY(BlueprintReadOnly)
     FString StatusText;
+
+    /** Compact description of the concrete manifestation currently compiled from the graph. */
+    UPROPERTY(BlueprintReadOnly)
+    FString EffectPreview;
+
     UPROPERTY(BlueprintReadOnly)
     TArray<FKillerMovePublicSlot> Slots;
 };

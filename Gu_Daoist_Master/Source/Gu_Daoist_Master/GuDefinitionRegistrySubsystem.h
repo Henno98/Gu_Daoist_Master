@@ -34,6 +34,9 @@ public:
 
     const FGuDefinitionRecord* FindDefinition(FName IdOrName) const;
 
+    /** Returns the original authored UGuDefinition when this record came from a DataAsset. */
+    const UGuDefinition* FindDefinitionAsset(FName IdOrName) const;
+
     UFUNCTION(BlueprintPure, Category="Gu|Definitions")
     TArray<FGuDefinitionRecord> GetAllDefinitions() const;
 
@@ -55,6 +58,8 @@ private:
     static bool ValidateAndNormalize(FGuDefinitionRecord& InOutDefinition, FString& OutError);
 
     TMap<FName, FGuDefinitionRecord> DefinitionsById;
+    UPROPERTY(Transient)
+    TMap<FName, TObjectPtr<UGuDefinition>> AuthoredAssetsById;
     TMap<FString, FName> IdByName;
     TSet<FName> RuntimeDefinitionIds;
 };

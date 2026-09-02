@@ -14,8 +14,9 @@ class UKillerMoveDefinition;
  *
  * A formula names Gu species/roles. Beginning a move binds those requirements to
  * actual owned ECS Gu entities. Timed input then manipulates those physical worms.
- * The typed effect graph is compiled now; concrete GAS/refinement effect resolution
- * plugs into CompleteSession in the next layer.
+ * The typed effect graph is compiled from the participating Gu roles. A completed
+ * choreography is then resolved through the existing authored Gu/GAS mechanics,
+ * beginning with projectile-carried killer moves.
  */
 UCLASS()
 class GU_DAOIST_MASTER_API UKillerMoveSubsystem : public UGameInstanceSubsystem
@@ -80,5 +81,6 @@ private:
     void ReleaseAllAttention(FRuntimeSession& Session);
     void FinishSession(FRuntimeSession& Session, EKillerMoveRunState EndState, const FString& Message);
     void CompleteSession(FRuntimeSession& Session);
+    bool ResolveCompletedEffect(FRuntimeSession& Session, float ExecutionQuality, FString& OutSummary, FString& OutError);
     bool ResolvePhysicalGu(FRuntimeSession& Session, FString& OutError);
 };

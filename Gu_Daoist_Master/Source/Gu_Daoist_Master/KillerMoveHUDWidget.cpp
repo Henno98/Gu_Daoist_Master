@@ -66,6 +66,11 @@ void UKillerMoveHUDWidget::BuildNativeLayout()
     StateText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
     Root->AddChildToVerticalBox(StateText);
 
+    EffectText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+    EffectText->SetAutoWrapText(true);
+    EffectText->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.82f, 0.90f, 1.0f)));
+    Root->AddChildToVerticalBox(EffectText);
+
     StartButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
     AddButtonLabel(WidgetTree, StartButton, TEXT("KILLER MOVE"));
     StartButton->OnClicked.AddDynamic(this, &UKillerMoveHUDWidget::OnStartClicked);
@@ -118,7 +123,7 @@ void UKillerMoveHUDWidget::RefreshState()
 {
     const AGu_Daoist_MasterPlayerController* PC = Controller();
     const AGuPlayerState* PS = PC ? PC->GetPlayerState<AGuPlayerState>() : nullptr;
-    if (!PS || !PromptText || !StateText) return;
+    if (!PS || !PromptText || !StateText || !EffectText) return;
 
     const FKillerMovePublicState& State = PS->KillerMovePublicState;
     TitleText->SetText(FText::FromString(State.Name.IsEmpty() ? TEXT("Killer Move") : State.Name));
@@ -146,6 +151,11 @@ void UKillerMoveHUDWidget::RefreshState()
     StateText->SetText(FText::FromString(FString::Printf(
         TEXT("Step %d/%d | Stability %.0f | Quality %.0f%%"),
         State.CurrentStep, State.TotalSteps, State.Stability, State.ExecutionQuality * 100.0f)));
+
+    EffectText->SetText(FText::FromString(
+        State.EffectPreview.IsEmpty()
+            ? TEXT("Effect: not compiled yet.")
+            : FString::Printf(TEXT("Effect: %s"), *State.EffectPreview)));
 
     for (int32 Index = 0; Index < SlotButtons.Num(); ++Index)
     {

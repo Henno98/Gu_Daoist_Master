@@ -1,14 +1,30 @@
 #include "KillerMoveSubsystem.h"
 
+#include "AS_GuMasterAttributeSet.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
+#include "Abilities/GameplayAbility.h"
+#include "GameplayAbilitySpec.h"
+#include "DrawDebugHelpers.h"
+#include "GA_GuAbility.h"
+#include "GuExecutionLibrary.h"
+#include "GuSystemConfig.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
+#include "GameFramework/Pawn.h"
 #include "GuDefinitionRegistrySubsystem.h"
 #include "GuEntitySubsystem.h"
 #include "GuPlayerState.h"
+#include "Gu_Projectile.h"
 #include "KillerMoveDefinition.h"
 #include "MentalResourceComponent.h"
 #include "TimerManager.h"
+#include "UGuDefinition.h"
 
 namespace
 {
@@ -33,6 +49,337 @@ namespace
             || Role == EKillerMoveRole::Storage
             || Role == EKillerMoveRole::Termination
             || Role == EKillerMoveRole::Switching;
+    }
+
+    float KillerMoveRuntimeSemanticScore(const FRefinementSemanticProfile& Profile, const FName Key)
+    {
+        if (const float* Value = Profile.Attributes.Find(Key)) return FMath::Max(0.0f, *Value);
+        return 0.0f;
+    }
+
+    float KillerMoveRuntimeRoleCostWeight(const EKillerMoveRole Role)
+    {
+        switch (Role)
+        {
+        case EKillerMoveRole::Core: return 1.0f;
+        case EKillerMoveRole::Output: return 0.80f;
+        case EKillerMoveRole::Amplification: return 0.75f;
+        case EKillerMoveRole::Medium: return 0.70f;
+        case EKillerMoveRole::Fuel: return 0.45f;
+        case EKillerMoveRole::Targeting:
+        case EKillerMoveRole::InvestigationSensor:
+        case EKillerMoveRole::RecognitionValidation: return 0.55f;
+        case EKillerMoveRole::Stabilization:
+        case EKillerMoveRole::Safety:
+        case EKillerMoveRole::Buffer:
+        case EKillerMoveRole::Recovery: return 0.50f;
+        default: return 0.60f;
+        }
+    }
+
+    EKillerMoveRole KillerMoveRuntimeInferSupportRole(const FGuDefinitionRecord& Definition)
+    {
+        const FRefinementSemanticProfile& Profile = Definition.RefinementProfile;
+        const float Speed = KillerMoveRuntimeSemanticScore(Profile, TEXT("speed"));
+        const float Range = KillerMoveRuntimeSemanticScore(Profile, TEXT("range"));
+        const float Area = KillerMoveRuntimeSemanticScore(Profile, TEXT("area"));
+        const float Amplification = KillerMoveRuntimeSemanticScore(Profile, TEXT("amplification"));
+        const float Suppression = KillerMoveRuntimeSemanticScore(Profile, TEXT("suppression"));
+        const float Stability = KillerMoveRuntimeSemanticScore(Profile, TEXT("stability"));
+        const float Precision = KillerMoveRuntimeSemanticScore(Profile, TEXT("precision"));
+
+        if (Suppression >= 0.65f) return EKillerMoveRole::Suppression;
+        if (Speed >= 0.65f && Speed > Amplification + 0.10f) return EKillerMoveRole::Routing;
+        if (Precision >= 0.65f && Precision > Amplification + 0.15f) return EKillerMoveRole::Targeting;
+        if (Stability >= 0.65f) return EKillerMoveRole::Stabilization;
+        if (Area >= 0.70f && Area > Amplification + 0.15f) return EKillerMoveRole::Boundary;
+        if (Range >= 0.70f && Range > Amplification + 0.15f) return EKillerMoveRole::Routing;
+        return EKillerMoveRole::Amplification;
+    }
+
+    const FGuProjectileMechanic* KillerMoveRuntimeFindProjectile(const UGuDefinition* Definition)
+    {
+        if (!Definition) return nullptr;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (const FGuProjectileMechanic* Projectile = Mechanic.GetPtr<FGuProjectileMechanic>()) return Projectile;
+        }
+        return nullptr;
+    }
+
+    float KillerMoveRuntimeEssenceCost(const UGuDefinition* Definition)
+    {
+        if (!Definition) return 0.0f;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (const FGuEssenceCostMechanic* Cost = Mechanic.GetPtr<FGuEssenceCostMechanic>()) return FMath::Max(0.0f, Cost->Cost);
+        }
+        return 0.0f;
+    }
+
+    template <typename TMechanic>
+    void KillerMoveRuntimeAddMechanic(UGuDefinition* Definition, const TMechanic& Value)
+    {
+        if (!Definition) return;
+        TInstancedStruct<FGuMechanic> Entry;
+        Entry.InitializeAs<TMechanic>(Value);
+        Definition->Mechanics.Add(MoveTemp(Entry));
+    }
+
+    bool KillerMoveRuntimeParseJson(const FString& Json, TSharedPtr<FJsonObject>& OutObject)
+    {
+        OutObject.Reset();
+        if (Json.IsEmpty()) return false;
+        const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+        return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
+    }
+
+    float KillerMoveRuntimeJsonNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, const float Fallback = 0.0f)
+    {
+        if (!Object.IsValid()) return Fallback;
+        double Value = static_cast<double>(Fallback);
+        return Object->TryGetNumberField(Field, Value) ? static_cast<float>(Value) : Fallback;
+    }
+
+    FString KillerMoveRuntimeJsonString(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field)
+    {
+        FString Value;
+        return Object.IsValid() && Object->TryGetStringField(Field, Value) ? Value : FString();
+    }
+
+    void KillerMoveRuntimePopulateConcreteEffects(const FGuDefinitionRecord& Definition, FKillerMoveEffectNode& Node)
+    {
+        Node.Effects.Reset();
+        for (const FGuMechanicSpec& Mechanic : Definition.Mechanics)
+        {
+            TSharedPtr<FJsonObject> Json;
+            KillerMoveRuntimeParseJson(Mechanic.ConfigJson, Json);
+
+            FKillerMoveConcreteEffect Effect;
+            Effect.SourceMechanic = Mechanic.Type;
+
+            if (Mechanic.Type == TEXT("projectile"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::ProjectileCarrier;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("speed"));
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("range"), Definition.EffectProfile.Range);
+                Effect.Radius = KillerMoveRuntimeJsonNumber(Json, TEXT("radius"), Definition.EffectProfile.Area);
+                Effect.Detail = FString::Printf(
+                    TEXT("Projectile carrier: speed %.0f, range %.0f."),
+                    Effect.Magnitude,
+                    Effect.Range);
+            }
+            else if (Mechanic.Type == TEXT("damage"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Damage;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("damage"), Definition.EffectProfile.Magnitude);
+                Effect.Detail = FString::Printf(TEXT("%.1f damage."), Effect.Magnitude);
+            }
+            else if (Mechanic.Type == TEXT("knockback"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Knockback;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("strength"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("verticalStrength"));
+                Effect.Detail = FString::Printf(
+                    TEXT("%.0f knockback (vertical %.0f)."),
+                    Effect.Magnitude,
+                    Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("stat_modifier"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::StatModifier;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("magnitude"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                const FString Stat = KillerMoveRuntimeJsonString(Json, TEXT("stat"));
+                Effect.Detail = FString::Printf(
+                    TEXT("%s %+.1f for %.1fs."),
+                    Stat.IsEmpty() ? TEXT("Stat") : *Stat,
+                    Effect.Magnitude,
+                    Effect.SecondaryMagnitude);
+            }
+            else
+            {
+                continue;
+            }
+
+            Node.Effects.Add(MoveTemp(Effect));
+        }
+    }
+
+    FString KillerMoveRuntimeEffectPreview(const FKillerMoveEffectGraph& Graph)
+    {
+        int32 Projectiles = 0;
+        int32 Damage = 0;
+        int32 Knockback = 0;
+        int32 Buffs = 0;
+        float TotalDamage = 0.0f;
+        float StrongestKnockback = 0.0f;
+
+        for (const FKillerMoveEffectNode& Node : Graph.Nodes)
+        {
+            for (const FKillerMoveConcreteEffect& Effect : Node.Effects)
+            {
+                switch (Effect.Type)
+                {
+                case EKillerMoveConcreteEffectType::ProjectileCarrier:
+                    ++Projectiles;
+                    break;
+                case EKillerMoveConcreteEffectType::Damage:
+                    ++Damage;
+                    TotalDamage += FMath::Max(0.0f, Effect.Magnitude);
+                    break;
+                case EKillerMoveConcreteEffectType::Knockback:
+                    ++Knockback;
+                    StrongestKnockback = FMath::Max(StrongestKnockback, Effect.Magnitude);
+                    break;
+                case EKillerMoveConcreteEffectType::StatModifier:
+                    ++Buffs;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+
+        TArray<FString> Parts;
+        if (Projectiles > 0) Parts.Add(TEXT("projectile carrier"));
+        if (Damage > 0) Parts.Add(FString::Printf(TEXT("%.1f raw damage payload"), TotalDamage));
+        if (Knockback > 0) Parts.Add(FString::Printf(TEXT("%.0f knockback"), StrongestKnockback));
+        if (Buffs > 0) Parts.Add(FString::Printf(TEXT("%d stat modifier%s"), Buffs, Buffs == 1 ? TEXT("") : TEXT("s")));
+        return Parts.IsEmpty() ? TEXT("No concrete executable effect is compiled yet.") : FString::Join(Parts, TEXT(" | "));
+    }
+
+    const UGuSystemConfig* KillerMoveRuntimeFindSystemConfig(UAbilitySystemComponent* ASC)
+    {
+        if (!ASC) return nullptr;
+
+        for (const FGameplayAbilitySpec& Spec : ASC->GetActivatableAbilities())
+        {
+            if (const UGA_GuAbility* AbilityCDO = Cast<UGA_GuAbility>(Spec.Ability.Get()))
+            {
+                if (UGuSystemConfig* Config = AbilityCDO->GetGuSystemConfig()) return Config;
+            }
+
+            if (UGameplayAbility* Instance = Spec.GetPrimaryInstance())
+            {
+                if (const UGA_GuAbility* GuAbility = Cast<UGA_GuAbility>(Instance))
+                {
+                    if (UGuSystemConfig* Config = GuAbility->GetGuSystemConfig()) return Config;
+                }
+            }
+        }
+
+        return nullptr;
+    }
+
+    bool KillerMoveRuntimeHasImpactMechanic(const UGuDefinition* Definition)
+    {
+        if (!Definition) return false;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (Mechanic.GetPtr<FGuDamageMechanic>() || Mechanic.GetPtr<FGuKnockbackMechanic>()) return true;
+        }
+        return false;
+    }
+
+    bool KillerMoveRuntimeHasActivationMechanic(const UGuDefinition* Definition)
+    {
+        if (!Definition) return false;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (Mechanic.GetPtr<FGuBuffMechanic>()) return true;
+        }
+        return false;
+    }
+
+    int32 KillerMoveRuntimeExecuteOverlapImpact(
+        UWorld* World,
+        UGuDefinition* Composite,
+        UAbilitySystemComponent* SourceASC,
+        AActor* SourceActor,
+        const FVector& Center,
+        const float Radius)
+    {
+        if (!World || !Composite || !SourceASC || !SourceActor || Radius <= 0.0f) return 0;
+
+        FCollisionObjectQueryParams Objects;
+        Objects.AddObjectTypesToQuery(ECC_Pawn);
+        Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+        FCollisionQueryParams Params(SCENE_QUERY_STAT(KillerMoveArea), false, SourceActor);
+        TArray<FOverlapResult> Overlaps;
+        World->OverlapMultiByObjectType(
+            Overlaps,
+            Center,
+            FQuat::Identity,
+            Objects,
+            FCollisionShape::MakeSphere(Radius),
+            Params);
+
+        TSet<AActor*> HitActors;
+        int32 ExecutedTargets = 0;
+        for (const FOverlapResult& Overlap : Overlaps)
+        {
+            AActor* Target = Overlap.GetActor();
+            if (!Target || Target == SourceActor || HitActors.Contains(Target)) continue;
+            HitActors.Add(Target);
+
+            FHitResult SyntheticHit;
+            SyntheticHit.TraceStart = SourceActor->GetActorLocation();
+            SyntheticHit.TraceEnd = Target->GetActorLocation();
+            SyntheticHit.Location = Target->GetActorLocation();
+            SyntheticHit.ImpactPoint = Target->GetActorLocation();
+            SyntheticHit.ImpactNormal = (SourceActor->GetActorLocation() - Target->GetActorLocation()).GetSafeNormal();
+
+            if (UGuExecutionLibrary::ExecuteImpact(Composite, SourceASC, Target, SyntheticHit))
+            {
+                ++ExecutedTargets;
+            }
+        }
+
+        return ExecutedTargets;
+    }
+
+    int32 KillerMoveRuntimeExecuteSweepImpact(
+        UWorld* World,
+        UGuDefinition* Composite,
+        UAbilitySystemComponent* SourceASC,
+        AActor* SourceActor,
+        const FVector& Start,
+        const FVector& End,
+        const float Radius)
+    {
+        if (!World || !Composite || !SourceASC || !SourceActor || Radius <= 0.0f) return 0;
+
+        FCollisionObjectQueryParams Objects;
+        Objects.AddObjectTypesToQuery(ECC_Pawn);
+        Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+        FCollisionQueryParams Params(SCENE_QUERY_STAT(KillerMoveSweep), false, SourceActor);
+        TArray<FHitResult> Hits;
+        World->SweepMultiByObjectType(
+            Hits,
+            Start,
+            End,
+            FQuat::Identity,
+            Objects,
+            FCollisionShape::MakeSphere(Radius),
+            Params);
+
+        TSet<AActor*> HitActors;
+        int32 ExecutedTargets = 0;
+        for (const FHitResult& Hit : Hits)
+        {
+            AActor* Target = Hit.GetActor();
+            if (!Target || Target == SourceActor || HitActors.Contains(Target)) continue;
+            HitActors.Add(Target);
+            if (UGuExecutionLibrary::ExecuteImpact(Composite, SourceASC, Target, Hit))
+            {
+                ++ExecutedTargets;
+            }
+        }
+
+        return ExecutedTargets;
     }
 }
 
@@ -63,8 +410,8 @@ float UKillerMoveSubsystem::EffectiveWindow(const AGuPlayerState* PlayerState, c
     const int32 FocusLevel = PlayerState && PlayerState->MentalResources
         ? FMath::Max(1, PlayerState->MentalResources->FocusControlLevel)
         : 1;
-    const float FocusBonus = FMath::Min(0.20f, static_cast<float>(FocusLevel - 1) * 0.015f);
-    return FMath::Clamp(Step.TimingWindow + FocusBonus, 0.03f, 2.0f);
+    const float FocusBonus = FMath::Min(0.25f, static_cast<float>(FocusLevel - 1) * 0.020f);
+    return FMath::Clamp(Step.TimingWindow + FocusBonus, 0.08f, 2.0f);
 }
 
 FName UKillerMoveSubsystem::AttentionKey(const FRuntimeSession& Session, const int32 SlotIndex) const
@@ -192,6 +539,7 @@ bool UKillerMoveSubsystem::BuildEffectGraph(FKillerMoveDefinitionRecord& InOutDe
         Node.Role = Index == 0 ? EKillerMoveRole::Core : Slot.Role;
         Node.Branch = BranchForRole(Node.Role);
         Node.Path = GuDefinition.Path;
+        KillerMoveRuntimePopulateConcreteEffects(GuDefinition, Node);
         InOutDefinition.EffectGraph.Nodes.Add(Node);
         if (Node.Role == EKillerMoveRole::Core && CoreIndex == INDEX_NONE) CoreIndex = Index;
         if (Node.Role == EKillerMoveRole::Medium && FirstMediumIndex == INDEX_NONE) FirstMediumIndex = Index;
@@ -365,7 +713,7 @@ void UKillerMoveSubsystem::ScheduleDeadline(FRuntimeSession& Session)
     World->GetTimerManager().ClearTimer(Session.DeadlineTimer);
     const FKillerMoveInputStep& Step = Session.Definition.Choreography[Session.StepIndex];
     const float Window = EffectiveWindow(Session.PlayerState.Get(), Step);
-    const float Deadline = Session.StartedServerWorldTime + Step.TargetTime + Window;
+    const float Deadline = Session.StartedServerWorldTime + Step.TargetTime + Window * 1.5f;
     const float Delay = FMath::Max(0.01f, Deadline - ServerWorldTime());
     FTimerDelegate Delegate;
     Delegate.BindUObject(this, &UKillerMoveSubsystem::HandleDeadline, Session.OwnerId);
@@ -448,6 +796,7 @@ bool UKillerMoveSubsystem::SubmitInput(AGuPlayerState* PlayerState, const int32 
     const float Now = ServerWorldTime();
     const float Elapsed = Now - Session->StartedServerWorldTime;
     const float Window = EffectiveWindow(PlayerState, Step);
+    const float SoftFailureWindow = Window * 1.5f;
     const float Offset = Elapsed - Step.TargetTime;
 
     if (SlotIndex != ExpectedSlotIndex || Event != Step.Event)
@@ -465,7 +814,7 @@ bool UKillerMoveSubsystem::SubmitInput(AGuPlayerState* PlayerState, const int32 
         return false;
     }
 
-    if (Offset < -Window)
+    if (Offset < -SoftFailureWindow)
     {
         if (Event == EKillerMoveInputEvent::Released && Session->HeldSlotIndices.Contains(SlotIndex))
         {
@@ -493,7 +842,7 @@ bool UKillerMoveSubsystem::SubmitInput(AGuPlayerState* PlayerState, const int32 
         OutError = TEXT("Input was too early.");
         return false;
     }
-    if (Offset > Window)
+    if (Offset > SoftFailureWindow)
     {
         return AdvancePastMissedStep(*Session, OutError);
     }
@@ -522,10 +871,11 @@ bool UKillerMoveSubsystem::SubmitInput(AGuPlayerState* PlayerState, const int32 
         Session->HeldSlotIndices.Remove(SlotIndex);
     }
 
-    const float Accuracy = FMath::Clamp(1.0f - FMath::Abs(Offset) / FMath::Max(Window, KINDA_SMALL_NUMBER), 0.0f, 1.0f);
+    const bool bStrainedTiming = FMath::Abs(Offset) > Window;
+    const float Accuracy = FMath::Clamp(1.0f - FMath::Abs(Offset) / FMath::Max(SoftFailureWindow, KINDA_SMALL_NUMBER), 0.0f, 1.0f);
     Session->QualitySum += Accuracy;
     ++Session->AcceptedSteps;
-    Session->Stability = FMath::Max(0.0f, Session->Stability - (1.0f - Accuracy) * 8.0f);
+    Session->Stability = FMath::Max(0.0f, Session->Stability - (1.0f - Accuracy) * 8.0f - (bStrainedTiming ? 5.0f : 0.0f));
     ++Session->StepIndex;
 
     if (Session->StepIndex >= Session->Definition.Choreography.Num())
@@ -534,7 +884,9 @@ bool UKillerMoveSubsystem::SubmitInput(AGuPlayerState* PlayerState, const int32 
         return true;
     }
 
-    PushPublicState(*Session, FString::Printf(TEXT("Input accepted (%+.0f ms)."), Offset * 1000.0f));
+    PushPublicState(*Session, FString::Printf(
+        bStrainedTiming ? TEXT("Input strained but accepted (%+.0f ms).") : TEXT("Input accepted (%+.0f ms)."),
+        Offset * 1000.0f));
     if (AGuPlayerState* PS = Session->PlayerState.Get())
     {
         FKillerMovePublicState Public = PS->KillerMovePublicState;
@@ -559,6 +911,7 @@ void UKillerMoveSubsystem::PushPublicState(FRuntimeSession& Session, const FStri
     Public.Stability = Session.Stability;
     Public.ExecutionQuality = Session.AcceptedSteps > 0 ? Session.QualitySum / static_cast<float>(Session.AcceptedSteps) : 0.0f;
     Public.StatusText = StatusText;
+    Public.EffectPreview = KillerMoveRuntimeEffectPreview(Session.Definition.EffectGraph);
 
     UGuDefinitionRegistrySubsystem* Registry = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
     for (const FKillerMoveGuSlot& Slot : Session.Definition.GuSlots)
@@ -622,14 +975,598 @@ void UKillerMoveSubsystem::FinishSession(FRuntimeSession& Session, const EKiller
     Sessions.Remove(OwnerId);
 }
 
+bool UKillerMoveSubsystem::ResolveCompletedEffect(
+    FRuntimeSession& Session,
+    const float ExecutionQuality,
+    FString& OutSummary,
+    FString& OutError)
+{
+    OutSummary.Reset();
+    OutError.Reset();
+
+    AGuPlayerState* PlayerState = Session.PlayerState.Get();
+    UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+    UGuDefinitionRegistrySubsystem* Registry = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UGuDefinitionRegistrySubsystem>()
+        : nullptr;
+    UGuEntitySubsystem* Entities = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UGuEntitySubsystem>()
+        : nullptr;
+    AController* Controller = PlayerState ? Cast<AController>(PlayerState->GetOwner()) : nullptr;
+    APawn* SourcePawn = Controller ? Controller->GetPawn() : nullptr;
+    UAbilitySystemComponent* SourceASC = SourcePawn
+        ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(SourcePawn)
+        : nullptr;
+
+    if (!PlayerState || !World || !Registry || !Entities || !SourcePawn || !SourceASC)
+    {
+        OutError = TEXT("The killer move cannot resolve because its world/GAS context is unavailable.");
+        return false;
+    }
+
+    if (Session.Definition.GuSlots.IsEmpty())
+    {
+        OutError = TEXT("The killer move has no Gu components.");
+        return false;
+    }
+
+    if (Session.BoundGuEntities.Num() != Session.Definition.GuSlots.Num())
+    {
+        OutError = TEXT("The killer move lost its physical Gu bindings before manifestation.");
+        return false;
+    }
+
+    // Choreography takes real time. Re-check every physical worm at the exact
+    // manifestation boundary rather than assuming its begin-state stayed valid.
+    for (int32 Index = 0; Index < Session.BoundGuEntities.Num(); ++Index)
+    {
+        const FGuid EntityId = Session.BoundGuEntities[Index];
+        const FKillerMoveGuSlot& Slot = Session.Definition.GuSlots[Index];
+        if (!EntityId.IsValid())
+        {
+            if (Slot.bRequired)
+            {
+                OutError = FString::Printf(TEXT("Required Gu '%s' is no longer bound."), *Slot.SlotId.ToString());
+                return false;
+            }
+            continue;
+        }
+
+        const FOwnedByComponent* Owner = Entities->GetOwnedBy(EntityId);
+        const FGuPlacementComponent* Placement = Entities->GetGuPlacement(EntityId);
+        const FGuInstanceComponent* Instance = Entities->GetGuInstance(EntityId);
+        FString CanUseError;
+        if (!Owner || Owner->OwnerId != Session.OwnerId
+            || !Placement || Placement->Container != EGuContainer::Aperture
+            || !Instance || Instance->DefinitionId != Slot.GuDefinitionId
+            || !Entities->CanUseGu(EntityId, CanUseError))
+        {
+            OutError = FString::Printf(
+                TEXT("%s changed during formation and can no longer participate%s%s."),
+                *Slot.SlotId.ToString(),
+                CanUseError.IsEmpty() ? TEXT("") : TEXT(": "),
+                CanUseError.IsEmpty() ? TEXT("") : *CanUseError);
+            return false;
+        }
+    }
+
+    TArray<const UGuDefinition*> Assets;
+    TArray<FGuDefinitionRecord> Records;
+    Assets.Reserve(Session.Definition.GuSlots.Num());
+    Records.Reserve(Session.Definition.GuSlots.Num());
+
+    for (const FKillerMoveGuSlot& Slot : Session.Definition.GuSlots)
+    {
+        FGuDefinitionRecord Record;
+        if (!Registry->GetDefinition(Slot.GuDefinitionId, Record))
+        {
+            OutError = FString::Printf(TEXT("Killer-move component '%s' lost its definition."), *Slot.SlotId.ToString());
+            return false;
+        }
+        const UGuDefinition* Asset = Registry->FindDefinitionAsset(Record.Id);
+        if (!Asset)
+        {
+            OutError = FString::Printf(
+                TEXT("%s is a runtime/generated Gu. Its domain semantics exist, but generated Gu -> GAS compilation is not ported yet."),
+                *Record.Name);
+            return false;
+        }
+        Assets.Add(Asset);
+        Records.Add(MoveTemp(Record));
+    }
+
+    int32 CoreIndex = Session.Definition.GuSlots.IndexOfByPredicate([](const FKillerMoveGuSlot& Slot)
+    {
+        return Slot.Role == EKillerMoveRole::Core;
+    });
+    if (CoreIndex == INDEX_NONE) CoreIndex = 0;
+
+    const UGuDefinition* CoreAsset = Assets[CoreIndex];
+    const FGuDefinitionRecord& CoreRecord = Records[CoreIndex];
+
+    // The browser method treats a Medium as an engineered carrier. Prefer a
+    // Medium's projectile form, otherwise keep the core Gu's native carrier.
+    int32 CarrierIndex = INDEX_NONE;
+    for (int32 Index = 0; Index < Assets.Num(); ++Index)
+    {
+        if (Session.Definition.GuSlots[Index].Role == EKillerMoveRole::Medium
+            && KillerMoveRuntimeFindProjectile(Assets[Index]))
+        {
+            CarrierIndex = Index;
+            break;
+        }
+    }
+    if (CarrierIndex == INDEX_NONE && KillerMoveRuntimeFindProjectile(CoreAsset)) CarrierIndex = CoreIndex;
+    if (CarrierIndex == INDEX_NONE)
+    {
+        for (int32 Index = 0; Index < Assets.Num(); ++Index)
+        {
+            if (KillerMoveRuntimeFindProjectile(Assets[Index]))
+            {
+                CarrierIndex = Index;
+                break;
+            }
+        }
+    }
+    const FGuProjectileMechanic* CarrierSource = CarrierIndex != INDEX_NONE
+        ? KillerMoveRuntimeFindProjectile(Assets[CarrierIndex])
+        : nullptr;
+
+    if (CarrierSource && (!CarrierSource->ProjectileClass || !CarrierSource->Mesh || !CarrierSource->Material))
+    {
+        OutError = TEXT("The killer move selected a projectile carrier, but that carrier is incomplete.");
+        return false;
+    }
+
+    const float Quality = FMath::Clamp(ExecutionQuality, 0.0f, 1.0f);
+    float PowerMultiplier = FMath::Lerp(0.72f, 1.0f, Quality);
+    float SpeedMultiplier = 1.0f;
+    float RangeMultiplier = 1.0f;
+    float RadiusMultiplier = 1.0f;
+    float TotalEssenceCost = 0.0f;
+    float AreaSemantic = 0.0f;
+    float RangeSemantic = 0.0f;
+    float PrecisionSemantic = 0.0f;
+
+    for (int32 Index = 0; Index < Records.Num(); ++Index)
+    {
+        const FKillerMoveGuSlot& Slot = Session.Definition.GuSlots[Index];
+        const FGuDefinitionRecord& Record = Records[Index];
+        const FRefinementSemanticProfile& Profile = Record.RefinementProfile;
+        const float Amplification = KillerMoveRuntimeSemanticScore(Profile, TEXT("amplification"));
+        const float Speed = KillerMoveRuntimeSemanticScore(Profile, TEXT("speed"));
+        const float Range = KillerMoveRuntimeSemanticScore(Profile, TEXT("range"));
+        const float Area = KillerMoveRuntimeSemanticScore(Profile, TEXT("area"));
+        const float Precision = KillerMoveRuntimeSemanticScore(Profile, TEXT("precision"));
+
+        AreaSemantic = FMath::Max(AreaSemantic, Area);
+        RangeSemantic = FMath::Max(RangeSemantic, Range);
+        PrecisionSemantic = FMath::Max(PrecisionSemantic, Precision);
+
+        TotalEssenceCost += KillerMoveRuntimeEssenceCost(Assets[Index])
+            * KillerMoveRuntimeRoleCostWeight(Index == CoreIndex ? EKillerMoveRole::Core : Slot.Role);
+
+        if (Index == CoreIndex) continue;
+        switch (Slot.Role)
+        {
+        case EKillerMoveRole::Output:
+            PowerMultiplier *= 1.10f + FMath::Min(0.30f, Amplification * 0.10f);
+            break;
+        case EKillerMoveRole::Amplification:
+            PowerMultiplier *= 1.15f + FMath::Min(0.40f, FMath::Max(Amplification, Speed * 0.35f) * 0.12f);
+            break;
+        case EKillerMoveRole::Medium:
+            SpeedMultiplier *= 1.0f + FMath::Min(0.45f, Speed * 0.18f);
+            RangeMultiplier *= 1.0f + FMath::Min(0.35f, Range * 0.16f);
+            RadiusMultiplier *= 1.0f + FMath::Min(0.25f, Area * 0.12f);
+            break;
+        case EKillerMoveRole::Routing:
+            SpeedMultiplier *= 1.0f + FMath::Min(0.35f, Speed * 0.16f);
+            RangeMultiplier *= 1.0f + FMath::Min(0.25f, Range * 0.12f);
+            break;
+        case EKillerMoveRole::Boundary:
+        case EKillerMoveRole::Anchor:
+            RangeMultiplier *= 1.0f + FMath::Min(0.22f, Range * 0.10f);
+            RadiusMultiplier *= 1.0f + FMath::Min(0.18f, Area * 0.09f);
+            break;
+        default:
+            break;
+        }
+    }
+
+    PowerMultiplier = FMath::Clamp(PowerMultiplier, 0.25f, 3.0f);
+    SpeedMultiplier = FMath::Clamp(SpeedMultiplier, 0.25f, 3.0f);
+    RangeMultiplier = FMath::Clamp(RangeMultiplier, 0.25f, 3.0f);
+    RadiusMultiplier = FMath::Clamp(RadiusMultiplier, 0.25f, 2.0f);
+
+    const FGameplayAttribute EssenceAttribute = UAS_GuMasterAttributeSet::GetPrimevalEssenceAttribute();
+    const float CurrentEssence = SourceASC->GetNumericAttribute(EssenceAttribute);
+    if (CurrentEssence + KINDA_SMALL_NUMBER < TotalEssenceCost)
+    {
+        OutError = FString::Printf(
+            TEXT("The killer move formed, but requires %.1f primeval essence and only %.1f remains."),
+            TotalEssenceCost,
+            CurrentEssence);
+        return false;
+    }
+
+    UGuDefinition* Composite = NewObject<UGuDefinition>(this, NAME_None, RF_Transient);
+    if (!Composite)
+    {
+        OutError = TEXT("Failed to create the killer move's transient Gu manifestation.");
+        return false;
+    }
+    Composite->Name = Session.Definition.Name;
+    Composite->Rank = FMath::Max(Session.Definition.Rank, CoreAsset->Rank);
+    Composite->Path = CoreAsset->Path;
+    Composite->StableDefinitionId = Session.Definition.Id;
+    Composite->ActivationModel = EGuActivationModel::Instant;
+    Composite->RefinementProfile = CoreRecord.RefinementProfile;
+    Composite->Appearance = CoreAsset->Appearance;
+
+    FGuProjectileMechanic Projectile;
+    if (CarrierSource)
+    {
+        Projectile = *CarrierSource;
+        Projectile.Speed *= SpeedMultiplier;
+        Projectile.MaxRange *= RangeMultiplier;
+        Projectile.Radius *= RadiusMultiplier;
+        Projectile.SphereRadius *= RadiusMultiplier;
+        Projectile.BoxExtent *= RadiusMultiplier;
+        Projectile.CapsuleRadius *= RadiusMultiplier;
+        Projectile.CapsuleHalfHeight *= RadiusMultiplier;
+        KillerMoveRuntimeAddMechanic(Composite, Projectile);
+    }
+
+    int32 ImpactMechanics = 0;
+    int32 ActivationMechanics = 0;
+    for (const TInstancedStruct<FGuMechanic>& Mechanic : CoreAsset->Mechanics)
+    {
+        if (const FGuDamageMechanic* Damage = Mechanic.GetPtr<FGuDamageMechanic>())
+        {
+            FGuDamageMechanic CombinedDamage = *Damage;
+            CombinedDamage.Damage *= PowerMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, CombinedDamage);
+            ++ImpactMechanics;
+        }
+        else if (const FGuKnockbackMechanic* Knockback = Mechanic.GetPtr<FGuKnockbackMechanic>())
+        {
+            FGuKnockbackMechanic CombinedKnockback = *Knockback;
+            CombinedKnockback.Strength *= PowerMultiplier;
+            CombinedKnockback.VerticalStrength *= PowerMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, CombinedKnockback);
+            ++ImpactMechanics;
+        }
+        else if (const FGuBuffMechanic* Buff = Mechanic.GetPtr<FGuBuffMechanic>())
+        {
+            FGuBuffMechanic CombinedBuff = *Buff;
+            CombinedBuff.Magnitude *= PowerMultiplier;
+            CombinedBuff.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, CombinedBuff);
+            ++ActivationMechanics;
+        }
+    }
+
+    // Supporting Gu contribute only the mechanics appropriate to their graph role.
+    // This keeps a killer move compositional instead of simply firing every Gu
+    // independently at full strength.
+    for (int32 Index = 0; Index < Assets.Num(); ++Index)
+    {
+        if (Index == CoreIndex) continue;
+        const EKillerMoveRole Role = Session.Definition.GuSlots[Index].Role;
+
+        float ImpactWeight = 0.0f;
+        float BuffWeight = 0.0f;
+        switch (Role)
+        {
+        case EKillerMoveRole::Output:
+            ImpactWeight = 0.65f;
+            BuffWeight = 0.45f;
+            break;
+        case EKillerMoveRole::Suppression:
+            ImpactWeight = 0.55f;
+            break;
+        case EKillerMoveRole::Amplification:
+            ImpactWeight = 0.30f;
+            BuffWeight = 0.55f;
+            break;
+        case EKillerMoveRole::Stabilization:
+        case EKillerMoveRole::Safety:
+        case EKillerMoveRole::Buffer:
+        case EKillerMoveRole::Recovery:
+            BuffWeight = 0.75f;
+            break;
+        case EKillerMoveRole::Control:
+            ImpactWeight = 0.25f;
+            BuffWeight = 0.35f;
+            break;
+        default:
+            break;
+        }
+
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Assets[Index]->Mechanics)
+        {
+            if (ImpactWeight > 0.0f)
+            {
+                if (const FGuDamageMechanic* Damage = Mechanic.GetPtr<FGuDamageMechanic>())
+                {
+                    FGuDamageMechanic AddedDamage = *Damage;
+                    AddedDamage.Damage *= ImpactWeight * FMath::Lerp(0.75f, 1.0f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, AddedDamage);
+                    ++ImpactMechanics;
+                    continue;
+                }
+                if (const FGuKnockbackMechanic* Knockback = Mechanic.GetPtr<FGuKnockbackMechanic>())
+                {
+                    FGuKnockbackMechanic AddedKnockback = *Knockback;
+                    AddedKnockback.Strength *= ImpactWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    AddedKnockback.VerticalStrength *= ImpactWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, AddedKnockback);
+                    ++ImpactMechanics;
+                    continue;
+                }
+            }
+
+            if (BuffWeight > 0.0f)
+            {
+                if (const FGuBuffMechanic* Buff = Mechanic.GetPtr<FGuBuffMechanic>())
+                {
+                    FGuBuffMechanic AddedBuff = *Buff;
+                    AddedBuff.Magnitude *= BuffWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    AddedBuff.Duration *= FMath::Lerp(0.80f, 1.10f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, AddedBuff);
+                    ++ActivationMechanics;
+                }
+            }
+        }
+    }
+
+    if (ImpactMechanics <= 0 && ActivationMechanics <= 0)
+    {
+        OutError = TEXT("The killer move formed, but none of its Gu contribute a currently executable mechanic.");
+        return false;
+    }
+
+    const UGuSystemConfig* SystemConfig = KillerMoveRuntimeFindSystemConfig(SourceASC);
+
+    // Commit the combined cost only once the manifestation is actually ready.
+    // Individual press-time costs can be layered on later without changing the
+    // compiled effect graph.
+    SourceASC->SetNumericAttributeBase(
+        EssenceAttribute,
+        FMath::Max(0.0f, CurrentEssence - TotalEssenceCost));
+
+    bool bActivationExecuted = false;
+    if (ActivationMechanics > 0)
+    {
+        bActivationExecuted = UGuExecutionLibrary::ExecuteActivation(
+            Composite,
+            SourceASC,
+            SourcePawn,
+            SystemConfig);
+
+        if (!bActivationExecuted && !SystemConfig && ImpactMechanics <= 0)
+        {
+            SourceASC->SetNumericAttributeBase(EssenceAttribute, CurrentEssence);
+            OutError = TEXT(
+                "This killer move is a self/stat effect, but no GuSystemConfig could be found "
+                "on an active Gu ability to resolve its buff GameplayEffects.");
+            return false;
+        }
+    }
+
+    FString ManifestationLabel;
+    int32 AffectedTargets = 0;
+
+    if (CarrierSource)
+    {
+        const FVector SpawnLocation =
+            SourcePawn->GetActorLocation()
+            + SourcePawn->GetActorForwardVector() * 100.0f;
+        const FTransform SpawnTransform(
+            SourcePawn->GetActorRotation(),
+            SpawnLocation);
+
+        AGu_Projectile* SpawnedProjectile =
+            World->SpawnActorDeferred<AGu_Projectile>(
+                Projectile.ProjectileClass,
+                SpawnTransform,
+                SourcePawn,
+                SourcePawn,
+                ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+
+        if (!SpawnedProjectile)
+        {
+            SourceASC->SetNumericAttributeBase(EssenceAttribute, CurrentEssence);
+            OutError = TEXT("The killer move formed but its projectile manifestation could not spawn.");
+            return false;
+        }
+
+        SpawnedProjectile->FinishSpawning(SpawnTransform);
+        SpawnedProjectile->InitializeProjectile(
+            Projectile,
+            Composite,
+            SourceASC);
+
+        ManifestationLabel = FString::Printf(
+            TEXT("projectile (speed %.0f, range %.0f)"),
+            Projectile.Speed,
+            Projectile.MaxRange);
+    }
+    else if (ImpactMechanics > 0)
+    {
+        const bool bAreaMove = AreaSemantic >= 0.55f
+            || Records.ContainsByPredicate([](const FGuDefinitionRecord& Record)
+            {
+                return Record.KillerMove.Template == TEXT("area")
+                    || Record.KillerMove.Template == TEXT("field");
+            });
+
+        if (bAreaMove)
+        {
+            const float ForwardDistance = FMath::Clamp(
+                (170.0f + RangeSemantic * 260.0f) * RangeMultiplier,
+                150.0f,
+                900.0f);
+            const float AreaRadius = FMath::Clamp(
+                (130.0f + AreaSemantic * 220.0f) * RadiusMultiplier,
+                120.0f,
+                650.0f);
+            const FVector Center =
+                SourcePawn->GetActorLocation()
+                + SourcePawn->GetActorForwardVector() * ForwardDistance;
+
+            AffectedTargets = KillerMoveRuntimeExecuteOverlapImpact(
+                World,
+                Composite,
+                SourceASC,
+                SourcePawn,
+                Center,
+                AreaRadius);
+
+#if !UE_BUILD_SHIPPING
+            DrawDebugSphere(
+                World,
+                Center,
+                AreaRadius,
+                24,
+                FColor::White,
+                false,
+                0.75f,
+                0,
+                2.0f);
+#endif
+
+            ManifestationLabel = FString::Printf(
+                TEXT("area burst (radius %.0f, hit %d target%s)"),
+                AreaRadius,
+                AffectedTargets,
+                AffectedTargets == 1 ? TEXT("") : TEXT("s"));
+        }
+        else
+        {
+            const float SweepRange = FMath::Clamp(
+                (150.0f + RangeSemantic * 300.0f + PrecisionSemantic * 40.0f) * RangeMultiplier,
+                140.0f,
+                700.0f);
+            const float SweepRadius = FMath::Clamp(
+                (55.0f + AreaSemantic * 100.0f) * RadiusMultiplier,
+                45.0f,
+                180.0f);
+            const FVector Start = SourcePawn->GetActorLocation();
+            const FVector End =
+                Start
+                + SourcePawn->GetActorForwardVector() * SweepRange;
+
+            AffectedTargets = KillerMoveRuntimeExecuteSweepImpact(
+                World,
+                Composite,
+                SourceASC,
+                SourcePawn,
+                Start,
+                End,
+                SweepRadius);
+
+#if !UE_BUILD_SHIPPING
+            DrawDebugLine(
+                World,
+                Start,
+                End,
+                FColor::White,
+                false,
+                0.60f,
+                0,
+                3.0f);
+            DrawDebugSphere(
+                World,
+                End,
+                SweepRadius,
+                16,
+                FColor::White,
+                false,
+                0.60f,
+                0,
+                2.0f);
+#endif
+
+            ManifestationLabel = FString::Printf(
+                TEXT("melee/sweep (range %.0f, hit %d target%s)"),
+                SweepRange,
+                AffectedTargets,
+                AffectedTargets == 1 ? TEXT("") : TEXT("s"));
+        }
+    }
+    else if (bActivationExecuted)
+    {
+#if !UE_BUILD_SHIPPING
+        DrawDebugSphere(
+            World,
+            SourcePawn->GetActorLocation(),
+            90.0f,
+            16,
+            FColor::White,
+            false,
+            0.60f,
+            0,
+            2.0f);
+#endif
+        ManifestationLabel = TEXT("self effect");
+    }
+    else
+    {
+        SourceASC->SetNumericAttributeBase(EssenceAttribute, CurrentEssence);
+        OutError = TEXT("The killer move compiled mechanics but none could manifest in the world.");
+        return false;
+    }
+
+    for (const FGuid& EntityId : Session.BoundGuEntities)
+    {
+        if (!EntityId.IsValid()) continue;
+        FString LifecycleError;
+        if (!Entities->NotifySuccessfulGuActivation(EntityId, LifecycleError)
+            && !LifecycleError.IsEmpty())
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Killer-move Gu lifecycle settlement: %s"),
+                *LifecycleError);
+        }
+    }
+
+    OutSummary = FString::Printf(
+        TEXT("Released %s: power x%.2f, speed x%.2f, range x%.2f, cost %.1f essence%s."),
+        *ManifestationLabel,
+        PowerMultiplier,
+        SpeedMultiplier,
+        RangeMultiplier,
+        TotalEssenceCost,
+        bActivationExecuted ? TEXT(", activation effects applied") : TEXT(""));
+    return true;
+}
+
 void UKillerMoveSubsystem::CompleteSession(FRuntimeSession& Session)
 {
     const float Quality = Session.Definition.Choreography.Num() > 0
         ? Session.QualitySum / static_cast<float>(Session.Definition.Choreography.Num())
         : 0.0f;
+
+    FString EffectSummary;
+    FString EffectError;
+    if (!ResolveCompletedEffect(Session, Quality, EffectSummary, EffectError))
+    {
+        const FString Message = FString::Printf(
+            TEXT("Killer move formed at %.0f%% execution quality, but failed to manifest: %s"),
+            Quality * 100.0f,
+            *EffectError);
+        FinishSession(Session, EKillerMoveRunState::Failed, Message);
+        return;
+    }
+
     const FString Message = FString::Printf(
-        TEXT("Killer move formed. Execution quality %.0f%%. Effect graph ready for resolution."),
-        Quality * 100.0f);
+        TEXT("Killer move formed and released at %.0f%% execution quality. %s"),
+        Quality * 100.0f,
+        *EffectSummary);
     FinishSession(Session, EKillerMoveRunState::Completed, Message);
 }
 
@@ -691,7 +1628,14 @@ bool UKillerMoveSubsystem::BeginDebugKillerMove(AGuPlayerState* PlayerState, FSt
         Slot.SlotId = Index == 0 ? TEXT("Core") : TEXT("Support");
         Slot.GuDefinitionId = Instance->DefinitionId;
         Slot.PreferredEntityId = Owned[Index];
-        Slot.Role = Index == 0 ? EKillerMoveRole::Core : EKillerMoveRole::Amplification;
+        Slot.Role = EKillerMoveRole::Core;
+        if (Index > 0)
+        {
+            FGuDefinitionRecord SupportDefinition;
+            Slot.Role = Registry->GetDefinition(Instance->DefinitionId, SupportDefinition)
+                ? KillerMoveRuntimeInferSupportRole(SupportDefinition)
+                : EKillerMoveRole::Amplification;
+        }
         Slot.AttentionCost = 1.0f;
         Definition.GuSlots.Add(Slot);
     }
@@ -721,24 +1665,24 @@ bool UKillerMoveSubsystem::BeginDebugKillerMove(AGuPlayerState* PlayerState, FSt
 
     if (bCanOverlap)
     {
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 0.80f, 0.22f, true, true);
-        AddStep(TEXT("Support"), EKillerMoveInputEvent::Pressed, 1.25f, 0.20f, false, true);
-        AddStep(TEXT("Support"), EKillerMoveInputEvent::Released, 1.55f, 0.20f, false, false);
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.95f, 0.22f, true, false);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 0.80f, 0.42f, true, true);
+        AddStep(TEXT("Support"), EKillerMoveInputEvent::Pressed, 1.25f, 0.40f, false, true);
+        AddStep(TEXT("Support"), EKillerMoveInputEvent::Released, 1.55f, 0.40f, false, false);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.95f, 0.42f, true, false);
     }
     else if (Definition.GuSlots.Num() >= 2)
     {
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 0.70f, 0.24f, true, true);
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.00f, 0.22f, true, false);
-        AddStep(TEXT("Support"), EKillerMoveInputEvent::Pressed, 1.35f, 0.22f, false, true);
-        AddStep(TEXT("Support"), EKillerMoveInputEvent::Released, 1.65f, 0.22f, false, false);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 0.70f, 0.44f, true, true);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.00f, 0.42f, true, false);
+        AddStep(TEXT("Support"), EKillerMoveInputEvent::Pressed, 1.35f, 0.42f, false, true);
+        AddStep(TEXT("Support"), EKillerMoveInputEvent::Released, 1.65f, 0.42f, false, false);
     }
     else
     {
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 0.75f, 0.24f, true, true);
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.20f, 0.22f, true, false);
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 1.60f, 0.20f, false, true);
-        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.82f, 0.20f, false, false);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 0.75f, 0.44f, true, true);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.20f, 0.42f, true, false);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Pressed, 1.60f, 0.40f, false, true);
+        AddStep(TEXT("Core"), EKillerMoveInputEvent::Released, 1.82f, 0.40f, false, false);
     }
     return BeginKillerMove(PlayerState, Definition, OutError);
 #endif

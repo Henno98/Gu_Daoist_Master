@@ -17,6 +17,9 @@ class GU_DAOIST_MASTER_API UGA_GuAbility : public UGameplayAbility
 public:
     UGA_GuAbility();
 
+    /** Shared Gu execution config used by this ability class. Killer moves reuse it for composed activation effects. */
+    UGuSystemConfig* GetGuSystemConfig() const { return GuSystemConfig.Get(); }
+
 protected:
     UGuDefinition* GetGuDefinition(FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo) const;
     UGuInstanceObject* GetGuInstanceObject(FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo) const;

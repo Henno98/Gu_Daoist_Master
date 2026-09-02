@@ -28,6 +28,8 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<UTextBlock> StateText;
     UPROPERTY(Transient)
+    TObjectPtr<UTextBlock> EffectText;
+    UPROPERTY(Transient)
     TObjectPtr<UButton> StartButton;
     UPROPERTY(Transient)
     TObjectPtr<UButton> CancelButton;
