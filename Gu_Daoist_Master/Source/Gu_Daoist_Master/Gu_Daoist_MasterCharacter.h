@@ -7,7 +7,6 @@
 #include "AS_GuMasterAttributeSet.h"
 #include "GameFramework/Character.h"
 #include "Logging/LogMacros.h"
-
 #include "Gu_Daoist_MasterCharacter.generated.h"
 
 class UInputComponent;
@@ -17,117 +16,91 @@ class UInputAction;
 struct FInputActionValue;
 class UGameplayEffect;
 class UGameplayAbility;
-
 class UGuDefinition;
+class UGuInstanceObject;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
 
-/**
- *  A basic first person character
- */
 UCLASS(abstract)
 class AGu_Daoist_MasterCharacter : public ACharacter, public IAbilitySystemInterface
-
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
-	/** Pawn mesh: first person view (arms; seen only by self) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
-	USkeletalMeshComponent* FirstPersonMesh;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta=(AllowPrivateAccess="true"))
+    USkeletalMeshComponent* FirstPersonMesh;
 
-	/** First person camera */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
-	UCameraComponent* FirstPersonCameraComponent;
-
-
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta=(AllowPrivateAccess="true"))
+    UCameraComponent* FirstPersonCameraComponent;
 
 protected:
+    virtual void BeginPlay() override;
 
-protected:
-	virtual void BeginPlay() override;
+    UPROPERTY(EditAnywhere, Category="Input")
+    UInputAction* JumpAction;
 
-	/** Jump Input Action */
-	UPROPERTY(EditAnywhere, Category ="Input")
-	UInputAction* JumpAction;
+    UPROPERTY(EditAnywhere, Category="Input")
+    UInputAction* MoveAction;
 
-	/** Move Input Action */
-	UPROPERTY(EditAnywhere, Category ="Input")
-	UInputAction* MoveAction;
+    UPROPERTY(EditAnywhere, Category="Input")
+    UInputAction* LookAction;
 
-	/** Look Input Action */
-	UPROPERTY(EditAnywhere, Category ="Input")
-	class UInputAction* LookAction;
+    UPROPERTY(EditAnywhere, Category="Input")
+    UInputAction* MouseLookAction;
 
-	/** Mouse Look Input Action */
-	UPROPERTY(EditAnywhere, Category ="Input")
-	class UInputAction* MouseLookAction;
-	
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	TObjectPtr<UInputAction> ActivateGuAction;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Input")
+    TObjectPtr<UInputAction> ActivateGuAction;
 
-	FGameplayAbilitySpecHandle TestGuAbilityHandle;
-public:
-	AGu_Daoist_MasterCharacter();
-
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-
-	void ActivateTestGu(const FInputActionValue& Value);
-
-	virtual void PossessedBy(AController* NewController) override;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
-	TSubclassOf<UGameplayEffect> InitialAttributesEffect;
-
-	UPROPERTY()
-	TObjectPtr<UAS_GuMasterAttributeSet> AttributeSet;
-
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gu")
-	TSubclassOf<UGameplayAbility> GuAbilityClass;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Gu")
-	TObjectPtr<UGuDefinition> TestGuDefinition;
-
-protected:
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Abilities")
-	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
-
-	/** Called from Input Actions for movement input */
-	void MoveInput(const FInputActionValue& Value);
-
-	/** Called from Input Actions for looking input */
-	void LookInput(const FInputActionValue& Value);
-
-	/** Handles aim inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoAim(float Yaw, float Pitch);
-
-	/** Handles move inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoMove(float Right, float Forward);
-
-	/** Handles jump start inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoJumpStart();
-
-	/** Handles jump end inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
-	virtual void DoJumpEnd();
-
-protected:
-
-	/** Set up input action bindings */
-	virtual void SetupPlayerInputComponent(UInputComponent* InputComponent) override;
-	
+    FGameplayAbilitySpecHandle TestGuAbilityHandle;
 
 public:
+    AGu_Daoist_MasterCharacter();
 
-	/** Returns the first person mesh **/
-	USkeletalMeshComponent* GetFirstPersonMesh() const { return FirstPersonMesh; }
+    virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+    void ActivateTestGu(const FInputActionValue& Value);
+    virtual void PossessedBy(AController* NewController) override;
 
-	/** Returns first person camera component **/
-	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Abilities")
+    TSubclassOf<UGameplayEffect> InitialAttributesEffect;
 
+    UPROPERTY()
+    TObjectPtr<UAS_GuMasterAttributeSet> AttributeSet;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Gu")
+    TSubclassOf<UGameplayAbility> GuAbilityClass;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Gu")
+    TObjectPtr<UGuDefinition> TestGuDefinition;
+
+    /** Physical ECS entity backing the current test Gu ability. */
+    UPROPERTY(BlueprintReadOnly, Category="Gu|ECS")
+    FGuid TestGuEntityId;
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Abilities")
+    TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
+
+    /** Keeps the GAS SourceObject bridge alive for this granted ability. */
+    UPROPERTY(Transient)
+    TObjectPtr<UGuInstanceObject> TestGuInstanceObject;
+
+    void MoveInput(const FInputActionValue& Value);
+    void LookInput(const FInputActionValue& Value);
+
+    UFUNCTION(BlueprintCallable, Category="Input")
+    virtual void DoAim(float Yaw, float Pitch);
+
+    UFUNCTION(BlueprintCallable, Category="Input")
+    virtual void DoMove(float Right, float Forward);
+
+    UFUNCTION(BlueprintCallable, Category="Input")
+    virtual void DoJumpStart();
+
+    UFUNCTION(BlueprintCallable, Category="Input")
+    virtual void DoJumpEnd();
+
+    virtual void SetupPlayerInputComponent(UInputComponent* InputComponent) override;
+
+public:
+    USkeletalMeshComponent* GetFirstPersonMesh() const { return FirstPersonMesh; }
+    UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCameraComponent; }
 };
-

@@ -1,76 +1,291 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-
 #include "Gu_Daoist_MasterPlayerController.h"
-#include "EnhancedInputSubsystems.h"
-#include "Engine/LocalPlayer.h"
-#include "InputMappingContext.h"
-#include "Gu_Daoist_MasterCameraManager.h"
+
 #include "Blueprint/UserWidget.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
+#include "GuDefinitionRegistrySubsystem.h"
+#include "GuEntitySubsystem.h"
+#include "GuPlayerState.h"
 #include "Gu_Daoist_Master.h"
+#include "Gu_Daoist_MasterCameraManager.h"
+#include "InputMappingContext.h"
+#include "RefinementHUDWidget.h"
+#include "RefinementSubsystem.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 AGu_Daoist_MasterPlayerController::AGu_Daoist_MasterPlayerController()
 {
-	// set the player camera manager class
-	PlayerCameraManagerClass = AGu_Daoist_MasterCameraManager::StaticClass();
+    PlayerCameraManagerClass = AGu_Daoist_MasterCameraManager::StaticClass();
 }
 
 void AGu_Daoist_MasterPlayerController::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	
-	// only spawn touch controls on local player controllers
-	if (ShouldUseTouchControls() && IsLocalPlayerController())
-	{
-		// spawn the mobile controls widget
-		MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
+    if (ShouldUseTouchControls() && IsLocalPlayerController())
+    {
+        MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
+        if (MobileControlsWidget)
+        {
+            MobileControlsWidget->AddToPlayerScreen(0);
+        }
+        else
+        {
+            UE_LOG(LogGu_Daoist_Master, Error, TEXT("Could not spawn mobile controls widget."));
+        }
+    }
 
-		if (MobileControlsWidget)
-		{
-			// add the controls to the player screen
-			MobileControlsWidget->AddToPlayerScreen(0);
+    if (IsLocalPlayerController())
+    {
+        RefinementHUDWidget = CreateWidget<URefinementHUDWidget>(this, URefinementHUDWidget::StaticClass());
+        if (RefinementHUDWidget)
+        {
+            RefinementHUDWidget->AddToPlayerScreen(5);
+            bShowMouseCursor = true;
+            bEnableClickEvents = true;
+            bEnableMouseOverEvents = true;
 
-		} else {
-
-			UE_LOG(LogGu_Daoist_Master, Error, TEXT("Could not spawn mobile controls widget."));
-
-		}
-
-	}
+            FInputModeGameAndUI InputMode;
+            InputMode.SetHideCursorDuringCapture(false);
+            SetInputMode(InputMode);
+        }
+    }
 }
 
 void AGu_Daoist_MasterPlayerController::SetupInputComponent()
 {
-	Super::SetupInputComponent();
+    Super::SetupInputComponent();
 
-	// only add IMCs for local player controllers
-	if (IsLocalPlayerController())
-	{
-		// Add Input Mapping Context
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-		{
-			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
-			{
-				Subsystem->AddMappingContext(CurrentContext, 0);
-			}
-
-			// only add these IMCs if we're not using mobile touch input
-			if (!ShouldUseTouchControls())
-			{
-				for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
-				{
-					Subsystem->AddMappingContext(CurrentContext, 0);
-				}
-			}
-		}
-	}
-	
+    if (IsLocalPlayerController())
+    {
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+        {
+            for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+            {
+                Subsystem->AddMappingContext(CurrentContext, 0);
+            }
+            if (!ShouldUseTouchControls())
+            {
+                for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+                {
+                    Subsystem->AddMappingContext(CurrentContext, 0);
+                }
+            }
+        }
+    }
 }
 
 bool AGu_Daoist_MasterPlayerController::ShouldUseTouchControls() const
 {
-	// are we on a mobile platform? Should we force touch?
-	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+    return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
 }
+
+void AGu_Daoist_MasterPlayerController::ReportRefinementMessage(const FString& Message)
+{
+    if (!Message.IsEmpty()) ClientMessage(Message);
+}
+
+void AGu_Daoist_MasterPlayerController::RequestRefinementVerb(const ERefinementVerb Verb)
+{
+    if (HasAuthority()) ExecuteRefinementVerb(Verb);
+    else ServerUseRefinementVerb(Verb);
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteRefinementVerb(const ERefinementVerb Verb)
+{
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    URefinementSubsystem* Refinement = GetGameInstance() ? GetGameInstance()->GetSubsystem<URefinementSubsystem>() : nullptr;
+    if (!PS || !Refinement)
+    {
+        ReportRefinementMessage(TEXT("Refinement domain is unavailable. Check that the GameMode uses GuPlayerState."));
+        return;
+    }
+
+    FString Error;
+    if (!Refinement->UseBasicRefinementAction(PS, Verb, Error)) ReportRefinementMessage(Error);
+}
+
+void AGu_Daoist_MasterPlayerController::RefineProcess() { RequestRefinementVerb(ERefinementVerb::Process); }
+void AGu_Daoist_MasterPlayerController::RefineHeat() { RequestRefinementVerb(ERefinementVerb::Heat); }
+void AGu_Daoist_MasterPlayerController::RefineCool() { RequestRefinementVerb(ERefinementVerb::Cool); }
+void AGu_Daoist_MasterPlayerController::RefineMerge() { RequestRefinementVerb(ERefinementVerb::Merge); }
+void AGu_Daoist_MasterPlayerController::RefinePurify() { RequestRefinementVerb(ERefinementVerb::Purify); }
+void AGu_Daoist_MasterPlayerController::RefineControl() { RequestRefinementVerb(ERefinementVerb::Control); }
+void AGu_Daoist_MasterPlayerController::RefineCondense() { RequestRefinementVerb(ERefinementVerb::Condense); }
+
+void AGu_Daoist_MasterPlayerController::RefineAbort()
+{
+    if (HasAuthority()) ExecuteAbortRefinement();
+    else ServerAbortRefinement();
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteAbortRefinement()
+{
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    URefinementSubsystem* Refinement = GetGameInstance() ? GetGameInstance()->GetSubsystem<URefinementSubsystem>() : nullptr;
+    if (!PS || !Refinement) return;
+    FString Error;
+    if (!Refinement->AbortRefinementSession(PS, Error)) ReportRefinementMessage(Error);
+}
+
+void AGu_Daoist_MasterPlayerController::RefineDebugStart()
+{
+#if !UE_BUILD_SHIPPING
+    if (HasAuthority()) ExecuteDebugStart(); else ServerRefineDebugStart();
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteDebugStart()
+{
+#if !UE_BUILD_SHIPPING
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    UGameInstance* GI = GetGameInstance();
+    URefinementSubsystem* Refinement = GI ? GI->GetSubsystem<URefinementSubsystem>() : nullptr;
+    UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+    UGuDefinitionRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
+    if (!PS || !Refinement || !Entities || !Registry) return;
+    if (Refinement->HasActiveSession(PS->DomainCharacterId))
+    {
+        ReportRefinementMessage(TEXT("A refinement is already active."));
+        return;
+    }
+
+    FRefinementSemanticProfile Foundation;
+    Foundation.Paths = {{TEXT("Fire"), 1.65f}};
+    Foundation.Properties = {{TEXT("heat"), 1.25f}, {TEXT("expansion"), .52f}, {TEXT("precision"), .34f}};
+    Foundation.Attributes = {{TEXT("range"), .82f}, {TEXT("precision"), .6f}};
+    Foundation.Templates = {{TEXT("projectile"), 1.0f}};
+    Foundation.DaoMass = 1.45f;
+
+    FRefinementSemanticProfile Catalyst;
+    Catalyst.Paths = {{TEXT("Fire"), .78f}};
+    Catalyst.Properties = {{TEXT("motion"), .72f}, {TEXT("flow"), .3f}};
+    Catalyst.Attributes = {{TEXT("speed"), .55f}};
+    Catalyst.DaoMass = .82f;
+
+    const FGuid A = Entities->CreateMaterialLot(Foundation, TEXT("Debug Fire Foundation"), 3, TEXT("debug"), FGuid());
+    const FGuid B = Entities->CreateMaterialLot(Catalyst, TEXT("Debug Swift Catalyst"), 2, TEXT("debug"), FGuid());
+    FRefinementInputSelection FoundationSelection; FoundationSelection.EntityId = A; FoundationSelection.Quantity = 2;
+    FRefinementInputSelection CatalystSelection; CatalystSelection.EntityId = B; CatalystSelection.Quantity = 1;
+
+    FString Error;
+    if (!Refinement->BeginRefinementSessionWithQuantities(PS, {FoundationSelection, CatalystSelection}, NAME_None, false, Error))
+    {
+        Entities->DestroyEntity(A);
+        Entities->DestroyEntity(B);
+        ReportRefinementMessage(Error);
+        return;
+    }
+
+    const FName GuideId(TEXT("debug_cauldron_guide_gu"));
+    if (!Registry->HasDefinition(GuideId))
+    {
+        FGuDefinitionRecord Guide;
+        Guide.Id = GuideId;
+        Guide.Name = TEXT("Debug Cauldron Guide Gu");
+        Guide.Rank = 1;
+        Guide.Path = TEXT("Refinement");
+        Guide.Category = TEXT("Refinement");
+        Guide.FunctionalRoles = {TEXT("Refinement")};
+        Guide.Description = TEXT("Development-only Gu used to exercise native refinement assistance.");
+        FGuMechanicSpec Mechanic; Mechanic.Type = TEXT("refinement_assistance"); Guide.Mechanics.Add(Mechanic);
+        Guide.RefinementAssistance.bEnabled = true;
+        Guide.RefinementAssistance.ProgressPercent = 18.0f;
+        Guide.RefinementAssistance.StabilityPerAction = 3.0f;
+        Guide.RefinementAssistance.ImpurityReductionPerAction = 2.0f;
+        Guide.RefinementAssistance.QualityBonus = 3.0f;
+        Guide.RefinementAssistance.ActionUses = 3;
+        Guide.RefinementAssistance.Processes = {TEXT("Process"), TEXT("Purify"), TEXT("Control"), TEXT("Condense")};
+        Guide.RefinementProfile.Paths = {{TEXT("Refinement"), 1.0f}};
+        Guide.RefinementProfile.Properties = {{TEXT("precision"), .8f}, {TEXT("stability"), .7f}, {TEXT("adhesion"), .45f}};
+        Guide.RefinementProfile.Attributes = {{TEXT("precision"), .7f}, {TEXT("stability"), .55f}};
+        Guide.RefinementProfile.Templates = {{TEXT("refinement"), 1.0f}};
+        Guide.RefinementProfile.DaoMass = .4f;
+        FString RegisterError;
+        Registry->RegisterDefinition(Guide, RegisterError, false);
+    }
+
+    const FGuid GuideEntity = Entities->CreateGuInstance(GuideId, PS->DomainCharacterId, EGuContainer::Aperture);
+    if (GuideEntity.IsValid())
+    {
+        FString AttachError;
+        if (!Refinement->AttachGuRefinementAssistant(PS, GuideEntity, AttachError)) ReportRefinementMessage(AttachError);
+    }
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::RefineDebugAuto()
+{
+#if !UE_BUILD_SHIPPING
+    if (HasAuthority()) ExecuteDebugAuto(); else ServerRefineDebugAuto();
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteDebugAuto()
+{
+#if !UE_BUILD_SHIPPING
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    URefinementSubsystem* Refinement = GetGameInstance() ? GetGameInstance()->GetSubsystem<URefinementSubsystem>() : nullptr;
+    if (!PS || !Refinement) return;
+
+    for (int32 Guard = 0; Guard < 160 && Refinement->HasActiveSession(PS->DomainCharacterId); ++Guard)
+    {
+        FRefinementSessionState State;
+        if (!Refinement->GetDebugSessionState(PS->DomainCharacterId, State) || !State.HiddenProcedure.IsValidIndex(State.StepIndex)) break;
+        const FRefinementProcedureStep& Step = State.HiddenProcedure[State.StepIndex];
+        ERefinementVerb Verb = Step.PrimaryProcess;
+        if (State.Impurities > Step.MaxImpurities - 2.0f) Verb = ERefinementVerb::Purify;
+        else if (State.Temperature < Step.TargetTemperature.X) Verb = ERefinementVerb::Heat;
+        else if (State.Temperature > Step.TargetTemperature.Y) Verb = ERefinementVerb::Cool;
+        else if (State.Stability < State.MaxStability * .55f) Verb = ERefinementVerb::Control;
+
+        FString Error;
+        if (!Refinement->UseBasicRefinementAction(PS, Verb, Error))
+        {
+            ReportRefinementMessage(Error);
+            break;
+        }
+    }
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::RefineDebugTechnique()
+{
+#if !UE_BUILD_SHIPPING
+    if (HasAuthority()) ExecuteDebugTechnique(); else ServerRefineDebugTechnique();
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteDebugTechnique()
+{
+#if !UE_BUILD_SHIPPING
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    URefinementSubsystem* Refinement = GetGameInstance() ? GetGameInstance()->GetSubsystem<URefinementSubsystem>() : nullptr;
+    if (!PS || !Refinement) return;
+
+    FRefinementSessionState State;
+    if (!Refinement->GetDebugSessionState(PS->DomainCharacterId, State))
+    {
+        ReportRefinementMessage(TEXT("No refinement session."));
+        return;
+    }
+
+    for (const FRefinementAssistanceContribution& Assistance : State.Assistance)
+    {
+        if (Assistance.UsesRemaining <= 0) continue;
+        FString Error;
+        if (!Refinement->UseGuRefinementAssistant(PS, Assistance.SourceEntityId, Error)) ReportRefinementMessage(Error);
+        return;
+    }
+    ReportRefinementMessage(TEXT("No prepared refinement-Gu technique remains."));
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::ServerUseRefinementVerb_Implementation(ERefinementVerb Verb) { ExecuteRefinementVerb(Verb); }
+void AGu_Daoist_MasterPlayerController::ServerAbortRefinement_Implementation() { ExecuteAbortRefinement(); }
+void AGu_Daoist_MasterPlayerController::ServerRefineDebugStart_Implementation() { ExecuteDebugStart(); }
+void AGu_Daoist_MasterPlayerController::ServerRefineDebugAuto_Implementation() { ExecuteDebugAuto(); }
+void AGu_Daoist_MasterPlayerController::ServerRefineDebugTechnique_Implementation() { ExecuteDebugTechnique(); }
