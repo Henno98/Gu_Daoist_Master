@@ -9,6 +9,8 @@
 #include "Engine/LocalPlayer.h"
 #include "GuDefinitionRegistrySubsystem.h"
 #include "GuEntitySubsystem.h"
+#include "GuHUDTabsWidget.h"
+#include "GuSemanticsHUDWidget.h"
 #include "GuPlayerState.h"
 #include "Gu_Daoist_Master.h"
 #include "Gu_Daoist_MasterCameraManager.h"
@@ -45,26 +47,67 @@ void AGu_Daoist_MasterPlayerController::BeginPlay()
 
     if (IsLocalPlayerController())
     {
+        GuHUDTabsWidget = CreateWidget<UGuHUDTabsWidget>(this, UGuHUDTabsWidget::StaticClass());
+        if (GuHUDTabsWidget)
+        {
+            GuHUDTabsWidget->AddToPlayerScreen(20);
+            GuHUDTabsWidget->SetPositionInViewport(FVector2D(15.0f, 12.0f), false);
+            GuHUDTabsWidget->SetDesiredSizeInViewport(FVector2D(460.0f, 44.0f));
+        }
+
+        GuSemanticsHUDWidget = CreateWidget<UGuSemanticsHUDWidget>(this, UGuSemanticsHUDWidget::StaticClass());
+        if (GuSemanticsHUDWidget)
+        {
+            GuSemanticsHUDWidget->AddToPlayerScreen(5);
+        }
+
         RefinementHUDWidget = CreateWidget<URefinementHUDWidget>(this, URefinementHUDWidget::StaticClass());
         if (RefinementHUDWidget)
         {
-            RefinementHUDWidget->AddToPlayerScreen(5);
-            bShowMouseCursor = true;
-            bEnableClickEvents = true;
-            bEnableMouseOverEvents = true;
-
-            FInputModeGameAndUI InputMode;
-            InputMode.SetHideCursorDuringCapture(false);
-            SetInputMode(InputMode);
+            RefinementHUDWidget->AddToPlayerScreen(6);
         }
 
         KillerMoveHUDWidget = CreateWidget<UKillerMoveHUDWidget>(this, UKillerMoveHUDWidget::StaticClass());
         if (KillerMoveHUDWidget)
         {
-            KillerMoveHUDWidget->AddToPlayerScreen(6);
-            KillerMoveHUDWidget->SetPositionInViewport(FVector2D(24.0f, 430.0f), false);
-            KillerMoveHUDWidget->SetDesiredSizeInViewport(FVector2D(560.0f, 240.0f));
+            KillerMoveHUDWidget->AddToPlayerScreen(7);
+            KillerMoveHUDWidget->SetPositionInViewport(FVector2D(15.0f, 96.0f), false);
+            KillerMoveHUDWidget->SetDesiredSizeInViewport(FVector2D(720.0f, 330.0f));
         }
+
+        ActiveGuHUDTab = EGuHUDTab::None;
+        ApplyGuHUDTabVisibility();
+
+        bShowMouseCursor = true;
+        bEnableClickEvents = true;
+        bEnableMouseOverEvents = true;
+
+        FInputModeGameAndUI InputMode;
+        InputMode.SetHideCursorDuringCapture(false);
+        SetInputMode(InputMode);
+    }
+}
+
+void AGu_Daoist_MasterPlayerController::ToggleGuHUDTab(const EGuHUDTab Tab)
+{
+    if (!IsLocalPlayerController()) return;
+    ActiveGuHUDTab = ActiveGuHUDTab == Tab ? EGuHUDTab::None : Tab;
+    ApplyGuHUDTabVisibility();
+}
+
+void AGu_Daoist_MasterPlayerController::ApplyGuHUDTabVisibility()
+{
+    if (GuSemanticsHUDWidget)
+    {
+        GuSemanticsHUDWidget->SetVisibility(ActiveGuHUDTab == EGuHUDTab::Gu ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+    if (RefinementHUDWidget)
+    {
+        RefinementHUDWidget->SetVisibility(ActiveGuHUDTab == EGuHUDTab::Refinement ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+    if (KillerMoveHUDWidget)
+    {
+        KillerMoveHUDWidget->SetVisibility(ActiveGuHUDTab == EGuHUDTab::KillerMove ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     }
 }
 

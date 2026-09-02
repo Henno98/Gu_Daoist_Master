@@ -381,7 +381,10 @@ bool URefinementSubsystem::AnalyzePhysicalInputs(const TArray<FGuid>& EntityIds,
                 if (const TMap<FName, float>* Profile = PathProperties().Find(Definition->Path)) AddScores(OutAnalysis.PropertyScores, *Profile, Rank * .72f * FoundationBoost);
             }
 
-            AddScores(OutAnalysis.PropertyScores, Semantic.Properties, Rank * .5f * FoundationBoost);
+            if (!Semantic.bDerivedPropertySnapshot)
+            {
+                AddScores(OutAnalysis.PropertyScores, Semantic.Properties, Rank * .5f * FoundationBoost);
+            }
             for (const TPair<FName, float>& Pair : Semantic.Attributes)
             {
                 AddScore(OutAnalysis.AttributeScores, Pair.Key, Rank * .78f * Pair.Value * (bFoundation ? 1.2f : 1.0f));
@@ -404,7 +407,10 @@ bool URefinementSubsystem::AnalyzePhysicalInputs(const TArray<FGuid>& EntityIds,
                 if (const TMap<FName, float>* Profile = PathProperties().Find(Pair.Key)) AddScores(OutAnalysis.PropertyScores, *Profile, Pair.Value * .48f);
                 if (const TMap<FName, float>* Traits = PathTraits().Find(Pair.Key)) AddScores(OutAnalysis.TraitScores, *Traits, Pair.Value * .12f);
             }
-            AddScores(OutAnalysis.PropertyScores, Semantic.Properties);
+            if (!Semantic.bDerivedPropertySnapshot)
+            {
+                AddScores(OutAnalysis.PropertyScores, Semantic.Properties);
+            }
             for (const TPair<FName, float>& Pair : Semantic.Attributes)
             {
                 AddScore(OutAnalysis.AttributeScores, Pair.Key, Pair.Value);

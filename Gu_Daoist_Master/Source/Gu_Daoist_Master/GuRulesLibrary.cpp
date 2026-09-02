@@ -211,6 +211,94 @@ FString TemplateForMechanic(const FString& Type, const TSharedPtr<FJsonObject>& 
     if (T == TEXT("refinement_assistance")) return TEXT("refinement");
     return FString();
 }
+
+
+const TMap<FName, TMap<FName, float>>& SemanticPathProperties()
+{
+    static const TMap<FName, TMap<FName, float>> Data = {
+        {TEXT("Fire"), {{TEXT("heat"),1.35f},{TEXT("motion"),.35f},{TEXT("expansion"),.3f}}},
+        {TEXT("Ice"), {{TEXT("cold"),1.35f},{TEXT("solid"),.7f},{TEXT("stillness"),.45f}}},
+        {TEXT("Water"), {{TEXT("fluid"),.95f},{TEXT("flow"),1.2f},{TEXT("cold"),.2f}}},
+        {TEXT("Wind"), {{TEXT("vapor"),.9f},{TEXT("motion"),1.25f},{TEXT("flow"),.55f}}},
+        {TEXT("Earth"), {{TEXT("solid"),1.0f},{TEXT("hardness"),1.05f},{TEXT("stability"),.75f}}},
+        {TEXT("Wood"), {{TEXT("vitality"),1.05f},{TEXT("growth"),1.15f},{TEXT("adhesion"),.35f}}},
+        {TEXT("Strength"), {{TEXT("force"),1.2f},{TEXT("hardness"),.7f}}},
+        {TEXT("Light"), {{TEXT("luminosity"),1.2f},{TEXT("precision"),.65f},{TEXT("heat"),.15f}}},
+        {TEXT("Moon"), {{TEXT("luminosity"),.75f},{TEXT("cold"),.35f},{TEXT("precision"),.35f}}},
+        {TEXT("Blood"), {{TEXT("blood"),1.25f},{TEXT("vitality"),.6f},{TEXT("adhesion"),.25f}}},
+        {TEXT("Food"), {{TEXT("assimilation"),1.2f},{TEXT("vitality"),.35f}}},
+        {TEXT("Transformation"), {{TEXT("adaptability"),1.2f},{TEXT("adhesion"),.55f}}},
+        {TEXT("Refinement"), {{TEXT("precision"),1.0f},{TEXT("stability"),1.0f},{TEXT("adhesion"),.55f}}},
+        {TEXT("Enslavement"), {{TEXT("control"),1.2f},{TEXT("link"),.8f}}},
+        {TEXT("Soul"), {{TEXT("persistence"),1.0f},{TEXT("control"),.55f}}},
+        {TEXT("Poison"), {{TEXT("corrosion"),1.15f},{TEXT("persistence"),.4f}}},
+        {TEXT("Metal"), {{TEXT("hardness"),1.0f},{TEXT("sharpness"),.85f},{TEXT("solid"),.55f}}},
+        {TEXT("Dark"), {{TEXT("concealment"),1.2f},{TEXT("stillness"),.62f},{TEXT("corrosion"),.42f},{TEXT("persistence"),.28f}}},
+        {TEXT("Shadow"), {{TEXT("concealment"),1.28f},{TEXT("adhesion"),.58f},{TEXT("stillness"),.45f},{TEXT("flow"),.3f}}},
+        {TEXT("Qi"), {{TEXT("flow"),.85f},{TEXT("expansion"),.7f},{TEXT("motion"),.55f}}},
+        {TEXT("Information"), {{TEXT("precision"),.85f},{TEXT("link"),.65f},{TEXT("persistence"),.35f}}},
+        {TEXT("Time"), {{TEXT("persistence"),.8f},{TEXT("timing"),1.2f}}},
+        {TEXT("Space"), {{TEXT("expansion"),1.0f},{TEXT("precision"),.45f}}},
+        {TEXT("Luck"), {{TEXT("adaptability"),.7f},{TEXT("flow"),.55f}}},
+    };
+    return Data;
+}
+
+const TMap<FName, TMap<FName, float>>& SemanticAttributeProperties()
+{
+    static const TMap<FName, TMap<FName, float>> Data = {
+        {TEXT("amplification"),{{TEXT("force"),.55f},{TEXT("expansion"),.4f}}},
+        {TEXT("range"),{{TEXT("expansion"),.65f},{TEXT("flow"),.25f}}},
+        {TEXT("area"),{{TEXT("expansion"),.8f}}},
+        {TEXT("speed"),{{TEXT("motion"),.8f},{TEXT("flow"),.3f}}},
+        {TEXT("duration"),{{TEXT("persistence"),.8f}}},
+        {TEXT("precision"),{{TEXT("precision"),.85f}}},
+        {TEXT("persistence"),{{TEXT("persistence"),.95f},{TEXT("stability"),.25f}}},
+        {TEXT("tracking"),{{TEXT("control"),.55f},{TEXT("precision"),.4f}}},
+        {TEXT("penetration"),{{TEXT("sharpness"),.7f},{TEXT("force"),.35f}}},
+        {TEXT("stability"),{{TEXT("stability"),.9f},{TEXT("solid"),.2f}}},
+        {TEXT("efficiency"),{{TEXT("assimilation"),.5f},{TEXT("precision"),.25f}}},
+        {TEXT("concealment"),{{TEXT("concealment"),.9f},{TEXT("stillness"),.2f}}},
+        {TEXT("suppression"),{{TEXT("control"),.75f},{TEXT("stillness"),.25f}}},
+        {TEXT("bleed"),{{TEXT("blood"),.8f},{TEXT("flow"),.2f}}},
+        {TEXT("poison"),{{TEXT("corrosion"),.85f}}},
+        {TEXT("timed"),{{TEXT("timing"),.85f},{TEXT("persistence"),.25f}}},
+        {TEXT("recovery"),{{TEXT("vitality"),.85f},{TEXT("growth"),.25f}}},
+        {TEXT("link"),{{TEXT("link"),.85f},{TEXT("adhesion"),.25f}}},
+    };
+    return Data;
+}
+
+const TMap<FName, TMap<FName, float>>& SemanticTraitProperties()
+{
+    static const TMap<FName, TMap<FName, float>> Data = {
+        {TEXT("consumable"),{{TEXT("force"),.22f},{TEXT("expansion"),.18f}}},
+        {TEXT("charged"),{{TEXT("timing"),.62f},{TEXT("persistence"),.24f}}},
+        {TEXT("stored"),{{TEXT("persistence"),.52f},{TEXT("stability"),.22f}}},
+        {TEXT("contact"),{{TEXT("adhesion"),.72f},{TEXT("precision"),.22f}}},
+        {TEXT("stationary"),{{TEXT("stillness"),.82f},{TEXT("stability"),.3f}}},
+        {TEXT("grounded"),{{TEXT("solid"),.62f},{TEXT("stability"),.38f}}},
+        {TEXT("delayed"),{{TEXT("timing"),.88f},{TEXT("persistence"),.22f}}},
+        {TEXT("maintained"),{{TEXT("persistence"),.68f},{TEXT("control"),.28f}}},
+        {TEXT("prepared"),{{TEXT("precision"),.42f},{TEXT("timing"),.4f}}},
+        {TEXT("environment_bound"),{{TEXT("adaptability"),.18f},{TEXT("stability"),.2f}}},
+        {TEXT("target_specific"),{{TEXT("precision"),.62f},{TEXT("link"),.35f}}},
+        {TEXT("self_cost"),{{TEXT("force"),.38f},{TEXT("expansion"),.12f}}},
+        {TEXT("short_lived"),{{TEXT("motion"),.32f},{TEXT("expansion"),.2f}}},
+        {TEXT("trigger"),{{TEXT("timing"),.72f},{TEXT("control"),.35f}}},
+        {TEXT("attached"),{{TEXT("adhesion"),.82f},{TEXT("link"),.42f}}},
+    };
+    return Data;
+}
+
+void AddPropertyRelation(TMap<FName, float>& Target, const TMap<FName, float>* Relation, const float Weight)
+{
+    if (!Relation || Weight <= 0.0f) return;
+    for (const TPair<FName, float>& Pair : *Relation)
+    {
+        if (!Pair.Key.IsNone() && Pair.Value > 0.0f) Target.FindOrAdd(Pair.Key) += Pair.Value * Weight;
+    }
+}
 }
 
 FRefinementSemanticProfile UGuRulesLibrary::BuildDefaultGuRefinementProfile(const FGuDefinitionRecord& Definition)
@@ -304,7 +392,71 @@ FRefinementSemanticProfile UGuRulesLibrary::BuildDefaultGuRefinementProfile(cons
 
     Profile.DaoMass = static_cast<float>(Rank * Rank) * 1.15f;
     NormalizeSemanticProfile(Profile);
+    MaterializeDerivedPropertySnapshot(Profile);
     return Profile;
+}
+
+void UGuRulesLibrary::MaterializeDerivedPropertySnapshot(FRefinementSemanticProfile& Profile)
+{
+    // Keep explicitly authored/generated physical properties authoritative.
+    if (!Profile.Properties.IsEmpty() && !Profile.bDerivedPropertySnapshot) return;
+
+    Profile.Properties.Reset();
+    for (const TPair<FName, float>& Pair : Profile.Paths)
+    {
+        AddPropertyRelation(Profile.Properties, SemanticPathProperties().Find(NormalizePath(Pair.Key)), Pair.Value);
+    }
+    for (const TPair<FName, float>& Pair : Profile.Attributes)
+    {
+        AddPropertyRelation(Profile.Properties, SemanticAttributeProperties().Find(Pair.Key), Pair.Value);
+    }
+    for (const TPair<FName, float>& Pair : Profile.Traits)
+    {
+        AddPropertyRelation(Profile.Properties, SemanticTraitProperties().Find(Pair.Key), Pair.Value);
+    }
+
+    Profile.bDerivedPropertySnapshot = true;
+    NormalizeScoreMap(Profile.Properties);
+}
+
+FRefinementSemanticProfile UGuRulesLibrary::BuildEffectiveGuRefinementProfile(const FGuDefinitionRecord& Definition)
+{
+    FRefinementSemanticProfile Effective = BuildDefaultGuRefinementProfile(Definition);
+    const FRefinementSemanticProfile& Authored = Definition.RefinementProfile;
+
+    auto AddMap = [](TMap<FName, float>& Target, const TMap<FName, float>& Source)
+    {
+        for (const TPair<FName, float>& Pair : Source)
+        {
+            if (!Pair.Key.IsNone() && FMath::IsFinite(Pair.Value) && Pair.Value > 0.0f)
+            {
+                Target.FindOrAdd(Pair.Key) += Pair.Value;
+            }
+        }
+    };
+
+    AddMap(Effective.Paths, Authored.Paths);
+    AddMap(Effective.Attributes, Authored.Attributes);
+    AddMap(Effective.Traits, Authored.Traits);
+    AddMap(Effective.Templates, Authored.Templates);
+
+    if (!Authored.Properties.IsEmpty())
+    {
+        // Explicit properties are real extra semantic evidence, exactly as in the
+        // browser model. Do not mark them as a derived display snapshot.
+        Effective.Properties = Authored.Properties;
+        Effective.bDerivedPropertySnapshot = false;
+    }
+    else
+    {
+        Effective.Properties.Reset();
+        Effective.bDerivedPropertySnapshot = true;
+        MaterializeDerivedPropertySnapshot(Effective);
+    }
+
+    if (Authored.DaoMass > 0.0f) Effective.DaoMass = Authored.DaoMass;
+    NormalizeSemanticProfile(Effective);
+    return Effective;
 }
 
 void UGuRulesLibrary::NormalizeScoreMap(TMap<FName, float>& Scores)

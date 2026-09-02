@@ -71,6 +71,15 @@ struct FRefinementSemanticProfile
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     TMap<FName, float> Properties;
 
+    /**
+     * True when Properties is a materialized snapshot derived from Paths /
+     * Attributes / Traits for inspection and cross-system use. Refinement must
+     * not add this map a second time because those source semantics already
+     * generate the same physical-property pressure during analysis.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, SaveGame)
+    bool bDerivedPropertySnapshot = false;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     TMap<FName, float> Attributes;
 

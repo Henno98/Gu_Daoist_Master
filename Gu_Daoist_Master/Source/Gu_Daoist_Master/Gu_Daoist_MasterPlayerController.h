@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerController.h"
 #include "RefinementTypes.h"
 #include "KillerMoveTypes.h"
+#include "GuHUDTypes.h"
 #include "Gu_Daoist_MasterPlayerController.generated.h"
 
 class UInputMappingContext;
@@ -13,6 +14,8 @@ class UUserWidget;
 class URefinementHUDWidget;
 class UKillerMoveHUDWidget;
 class UKillerMoveDefinition;
+class UGuHUDTabsWidget;
+class UGuSemanticsHUDWidget;
 
 UCLASS(abstract, config="Game")
 class GU_DAOIST_MASTER_API AGu_Daoist_MasterPlayerController : public APlayerController
@@ -44,6 +47,10 @@ public:
     UFUNCTION(BlueprintCallable, Category="Gu|Killer Move") void KillerMoveSlotInput(int32 SlotIndex, bool bPressed);
     UFUNCTION(BlueprintCallable, Category="Gu|Killer Move") void CancelKillerMove();
 
+    /** Opens a HUD page, or closes it when the same tab is clicked again. */
+    UFUNCTION(BlueprintCallable, Category="Gu|HUD") void ToggleGuHUDTab(EGuHUDTab Tab);
+    UFUNCTION(BlueprintPure, Category="Gu|HUD") EGuHUDTab GetActiveGuHUDTab() const { return ActiveGuHUDTab; }
+
 protected:
     UPROPERTY(EditAnywhere, Category="Input|Input Mappings")
     TArray<UInputMappingContext*> DefaultMappingContexts;
@@ -66,6 +73,12 @@ protected:
     UPROPERTY(Transient)
     TObjectPtr<UKillerMoveHUDWidget> KillerMoveHUDWidget;
 
+    UPROPERTY(Transient)
+    TObjectPtr<UGuHUDTabsWidget> GuHUDTabsWidget;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UGuSemanticsHUDWidget> GuSemanticsHUDWidget;
+
     /** Optional authored move used by the current Killer Move button until the learned-move selector lands. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Gu|Killer Move")
     TObjectPtr<UKillerMoveDefinition> TestKillerMoveDefinition;
@@ -75,6 +88,9 @@ protected:
     bool ShouldUseTouchControls() const;
 
 private:
+    EGuHUDTab ActiveGuHUDTab = EGuHUDTab::None;
+    void ApplyGuHUDTabVisibility();
+
     void RequestRefinementVerb(ERefinementVerb Verb);
     void ExecuteRefinementVerb(ERefinementVerb Verb);
     void ExecuteAbortRefinement();

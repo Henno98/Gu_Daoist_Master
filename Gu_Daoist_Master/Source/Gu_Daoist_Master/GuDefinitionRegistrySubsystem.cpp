@@ -151,6 +151,22 @@ bool UGuDefinitionRegistrySubsystem::BuildRecordFromAsset(
     // not implemented yet. Do not make ECS/refinement registration contingent on GAS support.
     if (Record.Mechanics.IsEmpty()) AddMechanic(Record, TEXT("semantic_only"));
 
+    // Legacy authored assets predate the shared semantic schema. Materialize the
+    // browser-equivalent Path/attribute/trait/template profile here so every
+    // physical ECS worm receives the real semantics rather than an empty shell.
+    if (!Asset->bRefinementSemanticsMaterialized)
+    {
+        Record.RefinementProfile = UGuRulesLibrary::BuildEffectiveGuRefinementProfile(Record);
+    }
+    else
+    {
+        UGuRulesLibrary::NormalizeSemanticProfile(Record.RefinementProfile);
+        if (Record.RefinementProfile.Properties.IsEmpty())
+        {
+            UGuRulesLibrary::MaterializeDerivedPropertySnapshot(Record.RefinementProfile);
+        }
+    }
+
     OutRecord = MoveTemp(Record);
     OutError.Reset();
     return true;
@@ -199,6 +215,10 @@ bool UGuDefinitionRegistrySubsystem::ValidateAndNormalize(FGuDefinitionRecord& D
     else
     {
         UGuRulesLibrary::NormalizeSemanticProfile(Definition.RefinementProfile);
+        if (Definition.RefinementProfile.Properties.IsEmpty())
+        {
+            UGuRulesLibrary::MaterializeDerivedPropertySnapshot(Definition.RefinementProfile);
+        }
     }
 
     OutError.Reset();

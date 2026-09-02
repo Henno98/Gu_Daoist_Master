@@ -16,6 +16,7 @@ class GU_DAOIST_MASTER_API UKillerMoveHUDWidget : public UUserWidget
     GENERATED_BODY()
 
 protected:
+    virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 

@@ -1,6 +1,7 @@
 #include "KillerMoveHUDWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
@@ -28,19 +29,34 @@ namespace
     }
 }
 
+void UKillerMoveHUDWidget::NativeOnInitialized()
+{
+    Super::NativeOnInitialized();
+    if (WidgetTree && !WidgetTree->RootWidget)
+    {
+        BuildNativeLayout();
+    }
+}
+
 void UKillerMoveHUDWidget::NativeConstruct()
 {
     Super::NativeConstruct();
-    if (!WidgetTree->RootWidget) BuildNativeLayout();
+    RefreshState();
 }
 
 void UKillerMoveHUDWidget::BuildNativeLayout()
 {
+    UBorder* Background = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+    Background->SetPadding(FMargin(12.0f));
+    Background->SetBrushColor(FLinearColor(0.018f, 0.021f, 0.028f, 0.94f));
+    WidgetTree->RootWidget = Background;
+
     UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-    WidgetTree->RootWidget = Root;
+    Background->SetContent(Root);
 
     TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-    TitleText->SetText(FText::FromString(TEXT("Killer Move")));
+    TitleText->SetText(FText::FromString(TEXT("KILLER MOVE")));
+    TitleText->SetColorAndOpacity(FSlateColor(FLinearColor(0.94f, 0.86f, 0.58f, 1.0f)));
     Root->AddChildToVerticalBox(TitleText);
 
     PromptText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());

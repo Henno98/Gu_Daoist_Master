@@ -52,6 +52,15 @@ public:
     UFUNCTION(BlueprintPure, Category="Gu|Refinement")
     static FRefinementSemanticProfile BuildDefaultGuRefinementProfile(const FGuDefinitionRecord& Definition);
 
+    /** Browser semantic relations materialized onto the entity for ECS-wide use. */
+    static void MaterializeDerivedPropertySnapshot(FRefinementSemanticProfile& Profile);
+
+    /**
+     * Builds the browser-equivalent inferred profile and adds authored semantic
+     * overrides. Used when migrating legacy UGuDefinition assets.
+     */
+    static FRefinementSemanticProfile BuildEffectiveGuRefinementProfile(const FGuDefinitionRecord& Definition);
+
     static void NormalizeScoreMap(TMap<FName, float>& Scores);
     static void NormalizeSemanticProfile(FRefinementSemanticProfile& Profile);
     static FName NormalizePath(FName Path);

@@ -20,7 +20,7 @@
 
 namespace
 {
-    void AddVertical(UVerticalBox* Box, UWidget* Widget, const FMargin Padding = FMargin(0.0f, 2.0f))
+    void AddRefinementVertical(UVerticalBox* Box, UWidget* Widget, const FMargin Padding = FMargin(0.0f, 2.0f))
     {
         if (!Box || !Widget) return;
         if (UVerticalBoxSlot* VerticalSlot = Box->AddChildToVerticalBox(Widget))
@@ -87,8 +87,8 @@ void URefinementHUDWidget::BuildWidgetTree()
     Panel->SetBrushColor(FLinearColor(0.018f, 0.021f, 0.028f, 0.92f));
 
     UCanvasPanelSlot* PanelSlot = Root->AddChildToCanvas(Panel);
-    PanelSlot->SetPosition(FVector2D(15.0f, 54.0f));
-    PanelSlot->SetSize(FVector2D(570.0f, 610.0f));
+    PanelSlot->SetPosition(FVector2D(15.0f, 96.0f));
+    PanelSlot->SetSize(FVector2D(720.0f, 610.0f));
     PanelSlot->SetAutoSize(false);
 
     UVerticalBox* Content = WidgetTree->ConstructWidget<UVerticalBox>();
@@ -96,26 +96,26 @@ void URefinementHUDWidget::BuildWidgetTree()
 
     UTextBlock* Title = MakeText(TEXT("REFINEMENT CAULDRON"));
     Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.94f, 0.86f, 0.58f, 1.0f)));
-    AddVertical(Content, Title, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
+    AddRefinementVertical(Content, Title, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
 
     OwnedGuText = MakeText(TEXT("Aperture Gu: none registered"), true);
     SessionText = MakeText(TEXT("No active refinement."));
     FormText = MakeText(TEXT("Form: Unformed"));
     ResponseText = MakeText(TEXT("Response: Unreadable"));
     ConditionText = MakeText(TEXT("Condition: Stable"));
-    AddVertical(Content, OwnedGuText, FMargin(0.0f, 0.0f, 0.0f, 6.0f));
-    AddVertical(Content, SessionText);
-    AddVertical(Content, FormText);
-    AddVertical(Content, ResponseText);
-    AddVertical(Content, ConditionText);
+    AddRefinementVertical(Content, OwnedGuText, FMargin(0.0f, 0.0f, 0.0f, 6.0f));
+    AddRefinementVertical(Content, SessionText);
+    AddRefinementVertical(Content, FormText);
+    AddRefinementVertical(Content, ResponseText);
+    AddRefinementVertical(Content, ConditionText);
 
     FocusText = MakeText(TEXT("Focus 0 / 100"));
-    AddVertical(Content, FocusText, FMargin(0.0f, 7.0f, 0.0f, 1.0f));
+    AddRefinementVertical(Content, FocusText, FMargin(0.0f, 7.0f, 0.0f, 1.0f));
 
     FocusBar = WidgetTree->ConstructWidget<UProgressBar>();
     FocusBar->SetPercent(0.0f);
     FocusBar->SetFillColorAndOpacity(FLinearColor(0.52f, 0.28f, 0.68f, 1.0f));
-    AddVertical(Content, FocusBar, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
+    AddRefinementVertical(Content, FocusBar, FMargin(0.0f, 0.0f, 0.0f, 5.0f));
 
     AssistanceText = MakeText(TEXT("No active refinement Gu assistance."), true);
     ObservationText = MakeText(TEXT(""), true);
@@ -124,35 +124,35 @@ void URefinementHUDWidget::BuildWidgetTree()
     DiagnosticsText = MakeText(TEXT(""), true);
     DiagnosticsText->SetColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.77f, 0.92f, 1.0f)));
     DiagnosticsText->SetVisibility(ESlateVisibility::Collapsed);
-    AddVertical(Content, AssistanceText);
-    AddVertical(Content, ObservationText, FMargin(0.0f, 4.0f));
-    AddVertical(Content, ResultText);
-    AddVertical(Content, DiagnosticsText, FMargin(0.0f, 4.0f));
+    AddRefinementVertical(Content, AssistanceText);
+    AddRefinementVertical(Content, ObservationText, FMargin(0.0f, 4.0f));
+    AddRefinementVertical(Content, ResultText);
+    AddRefinementVertical(Content, DiagnosticsText, FMargin(0.0f, 4.0f));
 
     UTextBlock* ActionsLabel = MakeText(TEXT("Refinement actions"));
     ActionsLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.94f, 0.86f, 0.58f, 1.0f)));
-    AddVertical(Content, ActionsLabel, FMargin(0.0f, 8.0f, 0.0f, 2.0f));
+    AddRefinementVertical(Content, ActionsLabel, FMargin(0.0f, 8.0f, 0.0f, 2.0f));
 
     UHorizontalBox* RowA = WidgetTree->ConstructWidget<UHorizontalBox>();
     ProcessButton = MakeButton(RowA, TEXT("Process"));
     HeatButton = MakeButton(RowA, TEXT("Heat"));
     CoolButton = MakeButton(RowA, TEXT("Cool"));
     MergeButton = MakeButton(RowA, TEXT("Merge"));
-    AddVertical(Content, RowA);
+    AddRefinementVertical(Content, RowA);
 
     UHorizontalBox* RowB = WidgetTree->ConstructWidget<UHorizontalBox>();
     PurifyButton = MakeButton(RowB, TEXT("Purify"));
     ControlButton = MakeButton(RowB, TEXT("Control"));
     CondenseButton = MakeButton(RowB, TEXT("Condense"));
     AbortButton = MakeButton(RowB, TEXT("Abort"));
-    AddVertical(Content, RowB);
+    AddRefinementVertical(Content, RowB);
 
     DebugControls = WidgetTree->ConstructWidget<UHorizontalBox>();
     DebugStartButton = MakeButton(DebugControls, TEXT("Start Test"));
     DebugTechniqueButton = MakeButton(DebugControls, TEXT("Use Assistant"));
     DebugAutoButton = MakeButton(DebugControls, TEXT("Auto Complete"));
     DebugDiagnosticsButton = MakeButton(DebugControls, TEXT("Diagnostics"));
-    AddVertical(Content, DebugControls, FMargin(0.0f, 8.0f, 0.0f, 0.0f));
+    AddRefinementVertical(Content, DebugControls, FMargin(0.0f, 8.0f, 0.0f, 0.0f));
 
 #if UE_BUILD_SHIPPING
     DebugControls->SetVisibility(ESlateVisibility::Collapsed);

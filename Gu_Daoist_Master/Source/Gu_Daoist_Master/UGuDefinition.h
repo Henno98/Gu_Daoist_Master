@@ -156,6 +156,15 @@ class GU_DAOIST_MASTER_API UGuDefinition : public UPrimaryDataAsset
     GENERATED_BODY()
 
 public:
+    virtual void PostLoad() override;
+
+    /**
+     * Rebuild the shared ECS/refinement semantics from this Gu's Path and GAS
+     * mechanics. Intended for legacy assets that predate the semantic fields.
+     */
+    UFUNCTION(CallInEditor, Category = "Gu|Refinement")
+    void RebuildRefinementSemantics();
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu")
     FText Name;
 
@@ -198,6 +207,14 @@ public:
      */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Refinement")
     FRefinementSemanticProfile RefinementProfile;
+
+    /**
+     * Migration marker. Legacy assets are upgraded once on load so their
+     * effective semantic profile is visible directly on UGuDefinition rather
+     * than existing only inside the runtime registry.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Gu|Refinement")
+    bool bRefinementSemanticsMaterialized = false;
 
     /** Enables this physical Gu to contribute a limited-use refinement technique. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Refinement")
