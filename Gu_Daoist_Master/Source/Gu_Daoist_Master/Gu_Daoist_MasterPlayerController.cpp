@@ -3,6 +3,7 @@
 #include "Gu_Daoist_MasterPlayerController.h"
 
 #include "Blueprint/UserWidget.h"
+#include "Components/InputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
@@ -12,6 +13,10 @@
 #include "Gu_Daoist_Master.h"
 #include "Gu_Daoist_MasterCameraManager.h"
 #include "InputMappingContext.h"
+#include "InputCoreTypes.h"
+#include "KillerMoveDefinition.h"
+#include "KillerMoveHUDWidget.h"
+#include "KillerMoveSubsystem.h"
 #include "RefinementHUDWidget.h"
 #include "RefinementSubsystem.h"
 #include "Widgets/Input/SVirtualJoystick.h"
@@ -52,6 +57,14 @@ void AGu_Daoist_MasterPlayerController::BeginPlay()
             InputMode.SetHideCursorDuringCapture(false);
             SetInputMode(InputMode);
         }
+
+        KillerMoveHUDWidget = CreateWidget<UKillerMoveHUDWidget>(this, UKillerMoveHUDWidget::StaticClass());
+        if (KillerMoveHUDWidget)
+        {
+            KillerMoveHUDWidget->AddToPlayerScreen(6);
+            KillerMoveHUDWidget->SetPositionInViewport(FVector2D(24.0f, 430.0f), false);
+            KillerMoveHUDWidget->SetDesiredSizeInViewport(FVector2D(560.0f, 240.0f));
+        }
     }
 }
 
@@ -75,6 +88,19 @@ void AGu_Daoist_MasterPlayerController::SetupInputComponent()
                 }
             }
         }
+    }
+
+    if (InputComponent)
+    {
+        InputComponent->BindKey(EKeys::K, IE_Pressed, this, &AGu_Daoist_MasterPlayerController::StartKillerMove);
+        InputComponent->BindKey(EKeys::One, IE_Pressed, this, &AGu_Daoist_MasterPlayerController::KillerSlot1Pressed);
+        InputComponent->BindKey(EKeys::One, IE_Released, this, &AGu_Daoist_MasterPlayerController::KillerSlot1Released);
+        InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &AGu_Daoist_MasterPlayerController::KillerSlot2Pressed);
+        InputComponent->BindKey(EKeys::Two, IE_Released, this, &AGu_Daoist_MasterPlayerController::KillerSlot2Released);
+        InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &AGu_Daoist_MasterPlayerController::KillerSlot3Pressed);
+        InputComponent->BindKey(EKeys::Three, IE_Released, this, &AGu_Daoist_MasterPlayerController::KillerSlot3Released);
+        InputComponent->BindKey(EKeys::Four, IE_Pressed, this, &AGu_Daoist_MasterPlayerController::KillerSlot4Pressed);
+        InputComponent->BindKey(EKeys::Four, IE_Released, this, &AGu_Daoist_MasterPlayerController::KillerSlot4Released);
     }
 }
 
@@ -289,3 +315,107 @@ void AGu_Daoist_MasterPlayerController::ServerAbortRefinement_Implementation() {
 void AGu_Daoist_MasterPlayerController::ServerRefineDebugStart_Implementation() { ExecuteDebugStart(); }
 void AGu_Daoist_MasterPlayerController::ServerRefineDebugAuto_Implementation() { ExecuteDebugAuto(); }
 void AGu_Daoist_MasterPlayerController::ServerRefineDebugTechnique_Implementation() { ExecuteDebugTechnique(); }
+
+
+void AGu_Daoist_MasterPlayerController::ReportKillerMoveMessage(const FString& Message)
+{
+    if (!Message.IsEmpty()) ClientMessage(Message);
+}
+
+void AGu_Daoist_MasterPlayerController::StartKillerMove()
+{
+    if (HasAuthority()) ExecuteStartKillerMove();
+    else ServerStartKillerMove();
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteStartKillerMove()
+{
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    UKillerMoveSubsystem* KillerMoves = GetGameInstance() ? GetGameInstance()->GetSubsystem<UKillerMoveSubsystem>() : nullptr;
+    if (!PS || !KillerMoves)
+    {
+        ReportKillerMoveMessage(TEXT("Killer-move domain is unavailable."));
+        return;
+    }
+
+    FString Error;
+    if (TestKillerMoveDefinition)
+    {
+        if (!KillerMoves->BeginKillerMoveAsset(PS, TestKillerMoveDefinition, Error)) ReportKillerMoveMessage(Error);
+        return;
+    }
+
+#if !UE_BUILD_SHIPPING
+    if (!KillerMoves->BeginDebugKillerMove(PS, Error)) ReportKillerMoveMessage(Error);
+#else
+    ReportKillerMoveMessage(TEXT("No killer move is configured."));
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::StartDebugKillerMove()
+{
+#if !UE_BUILD_SHIPPING
+    if (HasAuthority()) ExecuteStartDebugKillerMove();
+    else ServerStartDebugKillerMove();
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteStartDebugKillerMove()
+{
+#if !UE_BUILD_SHIPPING
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    UKillerMoveSubsystem* KillerMoves = GetGameInstance() ? GetGameInstance()->GetSubsystem<UKillerMoveSubsystem>() : nullptr;
+    if (!PS || !KillerMoves)
+    {
+        ReportKillerMoveMessage(TEXT("Killer-move domain is unavailable."));
+        return;
+    }
+    FString Error;
+    if (!KillerMoves->BeginDebugKillerMove(PS, Error)) ReportKillerMoveMessage(Error);
+#endif
+}
+
+void AGu_Daoist_MasterPlayerController::KillerMoveSlotInput(const int32 SlotIndex, const bool bPressed)
+{
+    const EKillerMoveInputEvent Event = bPressed ? EKillerMoveInputEvent::Pressed : EKillerMoveInputEvent::Released;
+    if (HasAuthority()) ExecuteKillerMoveSlotInput(SlotIndex, Event);
+    else ServerKillerMoveSlotInput(SlotIndex, Event);
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteKillerMoveSlotInput(const int32 SlotIndex, const EKillerMoveInputEvent Event)
+{
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    UKillerMoveSubsystem* KillerMoves = GetGameInstance() ? GetGameInstance()->GetSubsystem<UKillerMoveSubsystem>() : nullptr;
+    if (!PS || !KillerMoves) return;
+    FString Error;
+    if (!KillerMoves->SubmitInput(PS, SlotIndex, Event, Error) && !Error.IsEmpty()) ReportKillerMoveMessage(Error);
+}
+
+void AGu_Daoist_MasterPlayerController::CancelKillerMove()
+{
+    if (HasAuthority()) ExecuteCancelKillerMove();
+    else ServerCancelKillerMove();
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteCancelKillerMove()
+{
+    AGuPlayerState* PS = GetPlayerState<AGuPlayerState>();
+    UKillerMoveSubsystem* KillerMoves = GetGameInstance() ? GetGameInstance()->GetSubsystem<UKillerMoveSubsystem>() : nullptr;
+    if (!PS || !KillerMoves) return;
+    FString Error;
+    if (!KillerMoves->CancelKillerMove(PS, Error) && !Error.IsEmpty()) ReportKillerMoveMessage(Error);
+}
+
+void AGu_Daoist_MasterPlayerController::KillerSlot1Pressed() { KillerMoveSlotInput(0, true); }
+void AGu_Daoist_MasterPlayerController::KillerSlot1Released() { KillerMoveSlotInput(0, false); }
+void AGu_Daoist_MasterPlayerController::KillerSlot2Pressed() { KillerMoveSlotInput(1, true); }
+void AGu_Daoist_MasterPlayerController::KillerSlot2Released() { KillerMoveSlotInput(1, false); }
+void AGu_Daoist_MasterPlayerController::KillerSlot3Pressed() { KillerMoveSlotInput(2, true); }
+void AGu_Daoist_MasterPlayerController::KillerSlot3Released() { KillerMoveSlotInput(2, false); }
+void AGu_Daoist_MasterPlayerController::KillerSlot4Pressed() { KillerMoveSlotInput(3, true); }
+void AGu_Daoist_MasterPlayerController::KillerSlot4Released() { KillerMoveSlotInput(3, false); }
+
+void AGu_Daoist_MasterPlayerController::ServerStartKillerMove_Implementation() { ExecuteStartKillerMove(); }
+void AGu_Daoist_MasterPlayerController::ServerStartDebugKillerMove_Implementation() { ExecuteStartDebugKillerMove(); }
+void AGu_Daoist_MasterPlayerController::ServerKillerMoveSlotInput_Implementation(const int32 SlotIndex, const EKillerMoveInputEvent Event) { ExecuteKillerMoveSlotInput(SlotIndex, Event); }
+void AGu_Daoist_MasterPlayerController::ServerCancelKillerMove_Implementation() { ExecuteCancelKillerMove(); }

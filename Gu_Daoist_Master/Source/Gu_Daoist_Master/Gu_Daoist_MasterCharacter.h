@@ -71,6 +71,18 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Gu")
     TObjectPtr<UGuDefinition> TestGuDefinition;
 
+    /**
+     * Additional authored Gu initially owned in the aperture. These are physicalized
+     * into ECS for inventory/refinement/killer moves, but are not automatically
+     * granted standalone GAS input bindings yet. TestGuDefinition remains the
+     * currently activated test ability for backward compatibility.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Gu|Starting Inventory")
+    TArray<TObjectPtr<UGuDefinition>> StartingGuDefinitions;
+
+    UPROPERTY(BlueprintReadOnly, Category="Gu|ECS")
+    TArray<FGuid> StartingGuEntityIds;
+
     /** Physical ECS entity backing the current test Gu ability. */
     UPROPERTY(BlueprintReadOnly, Category="Gu|ECS")
     FGuid TestGuEntityId;

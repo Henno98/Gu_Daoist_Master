@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerState.h"
 #include "MentalResourceComponent.h"
 #include "RefinementTypes.h"
+#include "KillerMoveTypes.h"
 #include "GuPlayerState.generated.h"
 
 /**
@@ -48,12 +49,25 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Refinement")
     void ClearRefinementPublicState();
 
+    /** Player-safe killer-move timing projection. Physical Gu bindings remain server-only. */
+    UPROPERTY(BlueprintReadOnly, ReplicatedUsing=OnRep_KillerMovePublicState, Category="Gu|Killer Move")
+    FKillerMovePublicState KillerMovePublicState;
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Killer Move")
+    void SetKillerMovePublicState(const FKillerMovePublicState& NewState);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Killer Move")
+    void ClearKillerMovePublicState();
+
 private:
     UFUNCTION()
     void OnRep_DomainCharacterId();
 
     UFUNCTION()
     void OnRep_RefinementPublicState();
+
+    UFUNCTION()
+    void OnRep_KillerMovePublicState();
 
     void PropagateDomainCharacterId();
 };

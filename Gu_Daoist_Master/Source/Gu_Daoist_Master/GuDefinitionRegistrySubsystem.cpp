@@ -19,8 +19,9 @@ namespace
         return Raw.IsEmpty() ? NAME_None : FName(*Raw);
     }
 
-    FString EscapeJsonString(FString Value)
+    FString EscapeJsonForMechanicRecord(const FString& Input)
     {
+        FString Value = Input;
         Value.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
         Value.ReplaceInline(TEXT("\""), TEXT("\\\""));
         Value.ReplaceInline(TEXT("\n"), TEXT("\\n"));
@@ -125,22 +126,25 @@ bool UGuDefinitionRegistrySubsystem::BuildRecordFromAsset(
         if (const FGuBuffMechanic* Buff = Mechanic.GetPtr<FGuBuffMechanic>())
         {
             const FString AttributeName = Buff->Attribute.IsValid() ? Buff->Attribute.GetName() : TEXT("unknown");
+            const FString EscapedAttributeName = EscapeJsonForMechanicRecord(AttributeName);
             AddMechanic(
                 Record,
                 TEXT("stat_modifier"),
                 FString::Printf(
                     TEXT("{\"stat\":\"%s\",\"magnitude\":%.6f,\"duration\":%.6f}"),
-                    *EscapeJsonString(AttributeName),
+                    *EscapedAttributeName,
                     Buff->Magnitude,
                     Buff->Duration));
             continue;
         }
 
         const UScriptStruct* StructType = Mechanic.GetScriptStruct();
+        const FString StructName = GetNameSafe(StructType);
+        const FString EscapedStructName = EscapeJsonForMechanicRecord(StructName);
         AddMechanic(
             Record,
             TEXT("semantic_only"),
-            FString::Printf(TEXT("{\"sourceStruct\":\"%s\"}"), *EscapeJsonString(GetNameSafe(StructType))));
+            FString::Printf(TEXT("{\"sourceStruct\":\"%s\"}"), *EscapedStructName));
     }
 
     // A Gu is still a refinable physical Gu even while an activation mechanic is

@@ -23,6 +23,7 @@ void AGuPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AGuPlayerState, CultivationRank);
     DOREPLIFETIME(AGuPlayerState, DomainCharacterId);
     DOREPLIFETIME(AGuPlayerState, RefinementPublicState);
+    DOREPLIFETIME(AGuPlayerState, KillerMovePublicState);
 }
 
 void AGuPlayerState::SetDomainCharacterId(const FString& NewCharacterId)
@@ -55,6 +56,25 @@ void AGuPlayerState::ClearRefinementPublicState()
 void AGuPlayerState::OnRep_RefinementPublicState()
 {
     // UMG reads the replicated public projection directly.
+}
+
+void AGuPlayerState::SetKillerMovePublicState(const FKillerMovePublicState& NewState)
+{
+    if (!HasAuthority()) return;
+    KillerMovePublicState = NewState;
+    ForceNetUpdate();
+}
+
+void AGuPlayerState::ClearKillerMovePublicState()
+{
+    if (!HasAuthority()) return;
+    KillerMovePublicState = FKillerMovePublicState();
+    ForceNetUpdate();
+}
+
+void AGuPlayerState::OnRep_KillerMovePublicState()
+{
+    // Native killer-move UMG reads this replicated projection directly.
 }
 
 void AGuPlayerState::PropagateDomainCharacterId()

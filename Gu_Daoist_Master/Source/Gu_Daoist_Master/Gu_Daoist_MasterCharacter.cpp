@@ -174,6 +174,41 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
         }
     }
 
+    if (Registry && Entities && StartingGuDefinitions.Num() > 0)
+    {
+        AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+        const APlayerState* FallbackPlayerState = NewController ? NewController->GetPlayerState<APlayerState>() : nullptr;
+        const FString FallbackOwnerId = FString::Printf(TEXT("player:%d"), FallbackPlayerState ? FallbackPlayerState->GetPlayerId() : 0);
+        const FString OwnerId = DomainPlayerState && !DomainPlayerState->DomainCharacterId.IsEmpty()
+            ? DomainPlayerState->DomainCharacterId
+            : FallbackOwnerId;
+
+        StartingGuEntityIds.Reset();
+        if (TestGuEntityId.IsValid()) StartingGuEntityIds.Add(TestGuEntityId);
+
+        for (UGuDefinition* StartingDefinition : StartingGuDefinitions)
+        {
+            if (!StartingDefinition || StartingDefinition == TestGuDefinition) continue;
+
+            FString RegisterError;
+            if (!Registry->RegisterDefinitionAsset(StartingDefinition, RegisterError, true))
+            {
+                UE_LOG(LogTemp, Error, TEXT("Could not register starting Gu %s: %s"), *GetNameSafe(StartingDefinition), *RegisterError);
+                continue;
+            }
+
+            const FName DefinitionId = UGuDefinitionRegistrySubsystem::DefinitionIdForAsset(StartingDefinition);
+            FGuid EntityId;
+            if (!Entities->FindOwnedGuInstance(DefinitionId, OwnerId, EGuContainer::Aperture, EntityId, true))
+            {
+                EntityId = Entities->CreateGuInstance(DefinitionId, OwnerId, EGuContainer::Aperture);
+            }
+            if (EntityId.IsValid()) StartingGuEntityIds.AddUnique(EntityId);
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("Starting aperture ECS Gu: %d"), StartingGuEntityIds.Num());
+    }
+
     FGameplayAbilitySpec AbilitySpec(GuAbilityClass, 1, INDEX_NONE, AbilitySourceObject);
     TestGuAbilityHandle = AbilitySystemComponent->GiveAbility(AbilitySpec);
 
