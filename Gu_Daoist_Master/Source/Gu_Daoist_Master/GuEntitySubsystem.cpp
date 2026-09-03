@@ -1,6 +1,7 @@
 #include "GuEntitySubsystem.h"
 #include "GuDefinitionRegistrySubsystem.h"
 #include "GuRulesLibrary.h"
+#include "GuPersistenceSubsystem.h"
 
 int64 UGuEntitySubsystem::NowUnixMs()
 {
@@ -11,6 +12,17 @@ bool UGuEntitySubsystem::HasDomainAuthority() const
 {
     const UWorld* World = GetWorld();
     return !World || World->GetNetMode() != NM_Client;
+}
+
+void UGuEntitySubsystem::RequestPersistentSave()
+{
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UGuPersistenceSubsystem* Persistence = GI->GetSubsystem<UGuPersistenceSubsystem>())
+        {
+            Persistence->RequestAutosave();
+        }
+    }
 }
 
 FGuid UGuEntitySubsystem::AllocateEntityId(const FGuid* RequestedId) const
@@ -69,6 +81,7 @@ FGuid UGuEntitySubsystem::CreateRefinableEntity(
     const FGuid EntityId = AllocateEntityId();
     Entities.Add(EntityId);
     AttachRefinementSemantics(EntityId, Profile, Kind, SourceId, DefinitionId);
+    RequestPersistentSave();
     return EntityId;
 }
 
@@ -92,6 +105,7 @@ FGuid UGuEntitySubsystem::CreateMaterialLot(
     Lot.SourceKind = SourceKind;
     Lot.CreatedAtUnixMs = NowUnixMs();
     MaterialLots.Add(EntityId, MoveTemp(Lot));
+    RequestPersistentSave();
     return EntityId;
 }
 
@@ -109,6 +123,7 @@ bool UGuEntitySubsystem::ConsumeMaterialQuantity(const FGuid EntityId, const int
     }
     Lot->Quantity-=Requested;
     if (Lot->Quantity<=0) DestroyEntity(EntityId);
+    else RequestPersistentSave();
     OutError.Reset();
     return true;
 }
@@ -227,6 +242,7 @@ bool UGuEntitySubsystem::CreateGuInstanceWithId(
     }
 
     OutError.Reset();
+    RequestPersistentSave();
     return true;
 }
 
@@ -254,6 +270,7 @@ bool UGuEntitySubsystem::DestroyEntity(const FGuid EntityId)
     EnslavementControllers.Remove(EntityId);
     MultitaskingBoosts.Remove(EntityId);
     RefinementAssistants.Remove(EntityId);
+    RequestPersistentSave();
     return true;
 }
 
@@ -388,6 +405,7 @@ bool UGuEntitySubsystem::NotifySuccessfulGuActivation(const FGuid EntityId, FStr
     }
 
     OutError.Reset();
+    RequestPersistentSave();
     return true;
 }
 
@@ -400,6 +418,7 @@ void UGuEntitySubsystem::SetContamination(const FGuid EntityId, const FDaoContam
     UGuRulesLibrary::NormalizeScoreMap(Clean.Traits);
     Clean.Total = FMath::Max(0.0f, Clean.Total);
     DaoContamination.Add(EntityId, MoveTemp(Clean));
+    RequestPersistentSave();
 }
 
 void UGuEntitySubsystem::SetMultitaskingBoost(const FGuid EntityId, const FMultitaskingBoostComponent& Boost)
@@ -409,6 +428,7 @@ void UGuEntitySubsystem::SetMultitaskingBoost(const FGuid EntityId, const FMulti
     Clean.SlotsGranted = FMath::Max(0, Clean.SlotsGranted);
     if (Clean.SlotsGranted == 0) MultitaskingBoosts.Remove(EntityId);
     else MultitaskingBoosts.Add(EntityId, MoveTemp(Clean));
+    RequestPersistentSave();
 }
 
 bool UGuEntitySubsystem::ConsumeGuCharge(const FGuid EntityId, FString Reason)
@@ -437,6 +457,7 @@ bool UGuEntitySubsystem::ConsumeGuCharge(const FGuid EntityId, FString Reason)
         }
         UE_LOG(LogTemp, Log, TEXT("Consumed Gu entity %s: %s"), *EntityId.ToString(), *Reason);
     }
+    RequestPersistentSave();
     return true;
 }
 

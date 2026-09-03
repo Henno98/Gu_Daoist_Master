@@ -16,6 +16,7 @@
 #include "GuEntitySubsystem.h"
 #include "GuInstanceObject.h"
 #include "GuPlayerState.h"
+#include "GuPersistenceSubsystem.h"
 #include "Gu_Daoist_Master.h"
 #include "InputActionValue.h"
 #include "UGuDefinition.h"
@@ -104,6 +105,81 @@ void AGu_Daoist_MasterCharacter::ActivateTestGu(const FInputActionValue& Value)
     UE_LOG(LogTemp, Warning, TEXT("TryActivateAbility returned: %s"), bActivated ? TEXT("true") : TEXT("false"));
 }
 
+bool AGu_Daoist_MasterCharacter::GrantGuAbilityForEntity(
+    const FGuid EntityId,
+    UGuDefinition* Definition,
+    FGameplayAbilitySpecHandle& OutHandle,
+    FString& OutError)
+{
+    OutHandle = FGameplayAbilitySpecHandle();
+
+    if (!HasAuthority())
+    {
+        OutError = TEXT("Gu ability grants are server-authoritative.");
+        return false;
+    }
+    if (!AbilitySystemComponent || !GuAbilityClass)
+    {
+        OutError = TEXT("The character has no generic Gu ability class configured.");
+        return false;
+    }
+    if (!EntityId.IsValid() || !IsValid(Definition))
+    {
+        OutError = TEXT("A valid physical Gu entity and executable Gu definition are required.");
+        return false;
+    }
+
+    if (const FGameplayAbilitySpecHandle* ExistingHandle = RuntimeGuAbilityHandles.Find(EntityId))
+    {
+        OutHandle = *ExistingHandle;
+        OutError.Reset();
+        return OutHandle.IsValid();
+    }
+
+    UGuInstanceObject* InstanceBridge = NewObject<UGuInstanceObject>(this);
+    if (!InstanceBridge)
+    {
+        OutError = TEXT("Could not allocate the Gu ECS/GAS instance bridge.");
+        return false;
+    }
+    InstanceBridge->Initialize(EntityId, Definition);
+
+    FGameplayAbilitySpec AbilitySpec(GuAbilityClass, 1, INDEX_NONE, InstanceBridge);
+    const FGameplayAbilitySpecHandle NewHandle = AbilitySystemComponent->GiveAbility(AbilitySpec);
+    if (!NewHandle.IsValid())
+    {
+        OutError = TEXT("GAS refused to grant the generic Gu ability.");
+        return false;
+    }
+
+    RuntimeGuInstanceObjects.Add(InstanceBridge);
+    RuntimeGuAbilityHandles.Add(EntityId, NewHandle);
+    OutHandle = NewHandle;
+    OutError.Reset();
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Granted runtime Gu ability: %s -> entity %s"),
+        *Definition->Name.ToString(),
+        *EntityId.ToString());
+    return true;
+}
+
+bool AGu_Daoist_MasterCharacter::ActivateGuEntity(const FGuid EntityId)
+{
+    if (!HasAuthority() || !AbilitySystemComponent || !EntityId.IsValid()) return false;
+
+    const FGameplayAbilitySpecHandle* Handle = RuntimeGuAbilityHandles.Find(EntityId);
+    if (!Handle || !Handle->IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No runtime Gu ability is bound to entity %s."), *EntityId.ToString());
+        return false;
+    }
+
+    return AbilitySystemComponent->TryActivateAbility(*Handle);
+}
+
 void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
@@ -126,6 +202,34 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
     UGuEntitySubsystem* Entities = GameInstance
         ? GameInstance->GetSubsystem<UGuEntitySubsystem>()
         : nullptr;
+
+    // Register authored species before loading runtime species. Procedural v1 can borrow
+    // generic projectile/world carriers from authored Gu while reconstructing saved definitions.
+    if (Registry)
+    {
+        FString PreRegisterError;
+        if (TestGuDefinition)
+        {
+            Registry->RegisterDefinitionAsset(TestGuDefinition, PreRegisterError, true);
+        }
+        for (UGuDefinition* StartingDefinition : StartingGuDefinitions)
+        {
+            if (!StartingDefinition || StartingDefinition == TestGuDefinition) continue;
+            PreRegisterError.Reset();
+            Registry->RegisterDefinitionAsset(StartingDefinition, PreRegisterError, true);
+        }
+    }
+
+    if (UGuPersistenceSubsystem* Persistence = GameInstance
+            ? GameInstance->GetSubsystem<UGuPersistenceSubsystem>()
+            : nullptr)
+    {
+        FString LoadError;
+        if (!Persistence->EnsureLoaded(LoadError))
+        {
+            UE_LOG(LogTemp, Error, TEXT("Persistent Gu domain failed to load: %s"), *LoadError);
+        }
+    }
 
     if (Registry && Entities)
     {
@@ -220,6 +324,55 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
         *GetNameSafe(GuAbilityClass),
         *GetNameSafe(TestGuDefinition),
         TestGuEntityId.IsValid() ? *TestGuEntityId.ToString() : TEXT("legacy/no ECS entity"));
+
+    BindPersistedGuAbilities();
+}
+
+void AGu_Daoist_MasterCharacter::BindPersistedGuAbilities()
+{
+    if (!HasAuthority() || !AbilitySystemComponent || !GuAbilityClass) return;
+
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UGuDefinitionRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
+    UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+    if (!Registry || !Entities) return;
+
+    AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    const FString OwnerId = DomainPlayerState ? DomainPlayerState->DomainCharacterId : FString();
+    if (OwnerId.IsEmpty()) return;
+
+    int32 BoundCount = 0;
+    for (const FGuid EntityId : Entities->QueryGuEntitiesForOwner(OwnerId, EGuContainer::Aperture, true))
+    {
+        if (!EntityId.IsValid() || EntityId == TestGuEntityId) continue;
+        const FGuInstanceComponent* Instance = Entities->GetGuInstance(EntityId);
+        if (!Instance) continue;
+
+        UGuDefinition* ExecutableDefinition = const_cast<UGuDefinition*>(Registry->FindDefinitionAsset(Instance->DefinitionId));
+        if (!ExecutableDefinition)
+        {
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("Persisted Gu entity %s references definition %s with no executable UGuDefinition."),
+                *EntityId.ToString(),
+                *Instance->DefinitionId.ToString());
+            continue;
+        }
+
+        FGameplayAbilitySpecHandle Handle;
+        FString GrantError;
+        if (GrantGuAbilityForEntity(EntityId, ExecutableDefinition, Handle, GrantError))
+        {
+            ++BoundCount;
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Could not bind persisted Gu %s: %s"), *EntityId.ToString(), *GrantError);
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Bound %d persisted/aperture Gu entities to generic GAS abilities."), BoundCount);
 }
 
 void AGu_Daoist_MasterCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

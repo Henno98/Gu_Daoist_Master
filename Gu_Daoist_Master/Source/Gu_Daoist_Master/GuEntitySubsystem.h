@@ -86,6 +86,7 @@ private:
     bool HasDomainAuthority() const;
     FGuid AllocateEntityId(const FGuid* RequestedId = nullptr) const;
     void AttachRefinementSemantics(FGuid EntityId, const FRefinementSemanticProfile& Profile, ERefinableKind Kind, FName SourceId, FName DefinitionId);
+    void RequestPersistentSave();
 
     TSet<FGuid> Entities;
     TMap<FGuid, FRefinableEntityComponent> Refinables;

@@ -10,9 +10,9 @@ class UGuDefinition;
 /**
  * Runtime registry joining the original UGuDefinition DataAssets to the domain ECS.
  *
- * UGuDefinition remains the authored/GAS-facing species asset. The registry builds
- * a plain FGuDefinitionRecord from it so physical instances and refinement never
- * need to depend on a UObject asset existing as mutable instance state.
+ * UGuDefinition remains the executable/GAS-facing species definition. Authored
+ * DataAssets and transient procedural species both normalize into FGuDefinitionRecord,
+ * while physical instances/refinement keep mutable state in ECS rather than the UObject.
  */
 UCLASS()
 class GU_DAOIST_MASTER_API UGuDefinitionRegistrySubsystem : public UGameInstanceSubsystem
@@ -26,6 +26,9 @@ public:
     UFUNCTION(BlueprintCallable, Category="Gu|Definitions")
     bool RegisterDefinitionAsset(const UGuDefinition* Asset, FString& OutError, bool bReplaceExisting = false);
 
+    /** Registers a transient executable UGuDefinition together with its richer runtime/domain record. */
+    bool RegisterRuntimeDefinitionAsset(const FGuDefinitionRecord& Definition, UGuDefinition* RuntimeAsset, FString& OutError, bool bReplaceExisting = false);
+
     UFUNCTION(BlueprintPure, Category="Gu|Definitions")
     bool HasDefinition(FName IdOrName) const;
 
@@ -34,7 +37,7 @@ public:
 
     const FGuDefinitionRecord* FindDefinition(FName IdOrName) const;
 
-    /** Returns the original authored UGuDefinition when this record came from a DataAsset. */
+    /** Returns the executable authored or transient runtime UGuDefinition for this species. */
     const UGuDefinition* FindDefinitionAsset(FName IdOrName) const;
 
     UFUNCTION(BlueprintPure, Category="Gu|Definitions")
@@ -43,6 +46,12 @@ public:
     /** Runtime/refinement-created definitions only. */
     UFUNCTION(BlueprintPure, Category="Gu|Definitions")
     TArray<FGuDefinitionRecord> GetRuntimeDefinitions() const;
+
+    /** Stable functional fingerprint for runtime/procedural species duplicate prevention. */
+    static FString ComputeRuntimeSpeciesFingerprint(const FGuDefinitionRecord& Definition);
+
+    /** Finds an already-registered runtime species with the same canonical functional fingerprint. */
+    bool FindEquivalentRuntimeDefinition(const FGuDefinitionRecord& Definition, FName& OutDefinitionId) const;
 
     void ClearRuntimeDefinitions();
 
@@ -60,6 +69,12 @@ private:
     TMap<FName, FGuDefinitionRecord> DefinitionsById;
     UPROPERTY(Transient)
     TMap<FName, TObjectPtr<UGuDefinition>> AuthoredAssetsById;
+
+    /** Strong references keep transient procedurally/refinement-generated executable definitions alive. */
+    UPROPERTY(Transient)
+    TMap<FName, TObjectPtr<UGuDefinition>> RuntimeAssetsById;
+
     TMap<FString, FName> IdByName;
     TSet<FName> RuntimeDefinitionIds;
+    TMap<FString, FName> RuntimeIdByFingerprint;
 };

@@ -3,6 +3,8 @@
 #include "GuEntitySubsystem.h"
 #include "GuRulesLibrary.h"
 #include "GuPlayerState.h"
+#include "GuProceduralGeneratorSubsystem.h"
+#include "Gu_Daoist_MasterCharacter.h"
 #include "MentalResourceComponent.h"
 #include "Math/RandomStream.h"
 #include "Misc/Crc.h"
@@ -1722,6 +1724,7 @@ bool URefinementSubsystem::SecureSuccessfulOutcome(AGuPlayerState* PlayerState,F
     UGameInstance* GI=GetGameInstance();
     UGuEntitySubsystem* Entities=GI?GI->GetSubsystem<UGuEntitySubsystem>():nullptr;
     UGuDefinitionRegistrySubsystem* Registry=GI?GI->GetSubsystem<UGuDefinitionRegistrySubsystem>():nullptr;
+    UGuProceduralGeneratorSubsystem* Generator=GI?GI->GetSubsystem<UGuProceduralGeneratorSubsystem>():nullptr;
     if(!Entities||!Registry){OutError=TEXT("Gu domain systems are unavailable while securing the refinement.");return false;}
 
     FName ResultDefinitionId=Session.Outcome.ResultDefinitionId;
@@ -1729,16 +1732,55 @@ bool URefinementSubsystem::SecureSuccessfulOutcome(AGuPlayerState* PlayerState,F
     {
         FGuDefinitionRecord Definition=BuildExperimentalDefinition(Session);
         ResultDefinitionId=Definition.Id;
-        if(!Registry->HasDefinition(ResultDefinitionId))
+
+        // Experimental/refinement-created species must be executable UGuDefinitions, not record-only ECS metadata.
+        if(!Registry->FindDefinitionAsset(ResultDefinitionId))
         {
-            FString RegisterError;
-            if(!Registry->RegisterDefinition(Definition,RegisterError,false)){OutError=RegisterError;return false;}
+            if(!Generator)
+            {
+                OutError=TEXT("Procedural Gu compiler is unavailable while materializing the refined Gu definition.");
+                return false;
+            }
+            UGuDefinition* RuntimeDefinition=nullptr;
+            FString CompileError;
+            FName CanonicalDefinitionId=ResultDefinitionId;
+            if(!Generator->CompileAndRegisterRuntimeRecord(Definition,RuntimeDefinition,CompileError,true,&CanonicalDefinitionId))
+            {
+                OutError=FString::Printf(TEXT("The refined Gu formed semantically but could not become executable: %s"),*CompileError);
+                return false;
+            }
+            ResultDefinitionId=CanonicalDefinitionId;
         }
+
         Session.Outcome.ResultDefinitionId=ResultDefinitionId;
         Session.Outcome.ResultPath=Definition.Path;
         Session.Outcome.ResultRank=Definition.Rank;
     }
     if(ResultDefinitionId.IsNone()||!Registry->HasDefinition(ResultDefinitionId)){OutError=TEXT("Successful refinement resolved no valid Gu definition.");return false;}
+
+    // Upgrade any older runtime record-only definition on demand as it enters active gameplay.
+    if(!Registry->FindDefinitionAsset(ResultDefinitionId))
+    {
+        const FGuDefinitionRecord* RuntimeRecord=Registry->FindDefinition(ResultDefinitionId);
+        if(RuntimeRecord&&Generator)
+        {
+            UGuDefinition* RuntimeDefinition=nullptr;
+            FString CompileError;
+            FName CanonicalDefinitionId=ResultDefinitionId;
+            if(!Generator->CompileAndRegisterRuntimeRecord(*RuntimeRecord,RuntimeDefinition,CompileError,true,&CanonicalDefinitionId))
+            {
+                OutError=FString::Printf(TEXT("The Gu definition exists in the domain registry but has no executable mechanic definition: %s"),*CompileError);
+                return false;
+            }
+            ResultDefinitionId=CanonicalDefinitionId;
+            Session.Outcome.ResultDefinitionId=CanonicalDefinitionId;
+        }
+    }
+    if(!Registry->FindDefinitionAsset(ResultDefinitionId))
+    {
+        OutError=TEXT("Successful refinement resolved a Gu record, but no executable UGuDefinition exists for it.");
+        return false;
+    }
 
     // Inputs are destroyed immediately before the result is minted, so a failed registration never eats materials.
     ConsumeCommittedInputs(Session);
@@ -1749,6 +1791,21 @@ bool URefinementSubsystem::SecureSuccessfulOutcome(AGuPlayerState* PlayerState,F
         return false;
     }
     Session.Outcome.ResultEntityId=ResultEntity;
+
+    // If the refiner currently has a playable character, bind the new physical worm to the same generic Gu GAS ability immediately.
+    if(AGu_Daoist_MasterCharacter* Character=Cast<AGu_Daoist_MasterCharacter>(PlayerState->GetPawn()))
+    {
+        if(UGuDefinition* ExecutableDefinition=const_cast<UGuDefinition*>(Registry->FindDefinitionAsset(ResultDefinitionId)))
+        {
+            FGameplayAbilitySpecHandle GrantedHandle;
+            FString GrantError;
+            if(!Character->GrantGuAbilityForEntity(ResultEntity,ExecutableDefinition,GrantedHandle,GrantError))
+            {
+                UE_LOG(LogTemp,Warning,TEXT("Refined Gu %s is physical and executable, but its runtime GAS binding was deferred: %s"),*ResultDefinitionId.ToString(),*GrantError);
+            }
+        }
+    }
+
     if(FGuConditionComponent* Condition=Entities->GetMutableGuCondition(ResultEntity))
     {
         const float Score=Session.Stability-Session.Impurities+(Session.Focus/FMath::Max(1.0f,Session.MaxFocus))*10.0f+Session.AssistanceQualityBonus-ContaminationTotal(Session)*2.0f;

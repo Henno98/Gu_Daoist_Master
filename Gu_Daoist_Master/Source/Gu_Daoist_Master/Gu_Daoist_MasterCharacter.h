@@ -59,6 +59,13 @@ public:
     void ActivateTestGu(const FInputActionValue& Value);
     virtual void PossessedBy(AController* NewController) override;
 
+    /** Grants the generic Gu GAS ability for one physical ECS Gu entity. No per-species ability class is required. */
+    bool GrantGuAbilityForEntity(FGuid EntityId, UGuDefinition* Definition, FGameplayAbilitySpecHandle& OutHandle, FString& OutError);
+
+    /** Server-side activation entry point used by generated/refined Gu and future aperture UI. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
+    bool ActivateGuEntity(FGuid EntityId);
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Abilities")
     TSubclassOf<UGameplayEffect> InitialAttributesEffect;
 
@@ -94,6 +101,16 @@ protected:
     /** Keeps the GAS SourceObject bridge alive for this granted ability. */
     UPROPERTY(Transient)
     TObjectPtr<UGuInstanceObject> TestGuInstanceObject;
+
+    /** Strong references for runtime/generated Gu SourceObjects used by GAS ability specs. */
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UGuInstanceObject>> RuntimeGuInstanceObjects;
+
+    /** Physical Gu entity -> generic GAS ability spec. Server-authoritative runtime index. */
+    TMap<FGuid, FGameplayAbilitySpecHandle> RuntimeGuAbilityHandles;
+
+    /** Rebinds persisted physical Gu entities to the generic GAS ability after possession/load. */
+    void BindPersistedGuAbilities();
 
     void MoveInput(const FInputActionValue& Value);
     void LookInput(const FInputActionValue& Value);

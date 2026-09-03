@@ -11,6 +11,8 @@
 #include "GuEntitySubsystem.h"
 #include "GuHUDTabsWidget.h"
 #include "GuSemanticsHUDWidget.h"
+#include "GuProceduralGeneratorSubsystem.h"
+#include "Gu_Daoist_MasterCharacter.h"
 #include "GuPlayerState.h"
 #include "Gu_Daoist_Master.h"
 #include "Gu_Daoist_MasterCameraManager.h"
@@ -109,6 +111,95 @@ void AGu_Daoist_MasterPlayerController::ApplyGuHUDTabVisibility()
     {
         KillerMoveHUDWidget->SetVisibility(ActiveGuHUDTab == EGuHUDTab::KillerMove ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     }
+}
+
+void AGu_Daoist_MasterPlayerController::GuGenerate(FString PathTag, const int32 Rank, const int32 Seed, FString RoleText)
+{
+    if (HasAuthority()) ExecuteGuGenerate(PathTag, Rank, Seed, RoleText);
+    else ServerGuGenerate(PathTag, Rank, Seed, RoleText);
+}
+
+void AGu_Daoist_MasterPlayerController::ServerGuGenerate_Implementation(const FString& PathTag, const int32 Rank, const int32 Seed, const FString& RoleText)
+{
+    ExecuteGuGenerate(PathTag, Rank, Seed, RoleText);
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteGuGenerate(const FString& PathTag, const int32 Rank, const int32 Seed, const FString& RoleText)
+{
+    AGu_Daoist_MasterCharacter* PlayerCharacter = Cast<AGu_Daoist_MasterCharacter>(GetPawn());
+    UGameInstance* GI = GetGameInstance();
+    UGuProceduralGeneratorSubsystem* Generator = GI ? GI->GetSubsystem<UGuProceduralGeneratorSubsystem>() : nullptr;
+    if (!PlayerCharacter || !Generator)
+    {
+        ClientMessage(TEXT("GuGenerate failed: playable character or procedural Gu subsystem is unavailable."));
+        return;
+    }
+
+    const FGameplayTag RequestedPath = FGameplayTag::RequestGameplayTag(FName(*PathTag), false);
+    if (!RequestedPath.IsValid())
+    {
+        ClientMessage(FString::Printf(TEXT("GuGenerate failed: '%s' is not a registered Gameplay Tag. Expected Data.Paths.*."), *PathTag));
+        return;
+    }
+
+    EProceduralGuRole RequestedRole = EProceduralGuRole::Auto;
+    if (!UGuProceduralGeneratorSubsystem::TryParseRole(RoleText, RequestedRole))
+    {
+        ClientMessage(FString::Printf(TEXT("GuGenerate failed: unknown role '%s'. Use Auto, Offense, Defense, Movement, Healing, Control, Investigation, Concealment, Resource, Refinement or Support."), *RoleText));
+        return;
+    }
+
+    FProceduralGuGenerationRequest Request;
+    Request.PrimaryPath = RequestedPath;
+    Request.Rank = Rank;
+    Request.Seed = Seed;
+    Request.Role = RequestedRole;
+
+    FProceduralGuGenerationResult Result;
+    FString Error;
+    if (!Generator->GenerateAndGrantGu(PlayerCharacter, Request, Result, Error))
+    {
+        ClientMessage(FString::Printf(TEXT("GuGenerate failed: %s"), *Error));
+        return;
+    }
+
+    LastGeneratedGuEntityId = Result.EntityId;
+    const FString Message = FString::Printf(
+        TEXT("Generated %s | %s | seed=%d | id=%s | entity=%s"),
+        *Result.Name,
+        *Result.Summary,
+        Result.Seed,
+        *Result.DefinitionId.ToString(),
+        *Result.EntityId.ToString());
+    ClientMessage(Message);
+    UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
+}
+
+void AGu_Daoist_MasterPlayerController::GuUseLastGenerated()
+{
+    if (HasAuthority()) ExecuteUseLastGenerated();
+    else ServerUseLastGenerated();
+}
+
+void AGu_Daoist_MasterPlayerController::ServerUseLastGenerated_Implementation()
+{
+    ExecuteUseLastGenerated();
+}
+
+void AGu_Daoist_MasterPlayerController::ExecuteUseLastGenerated()
+{
+    AGu_Daoist_MasterCharacter* PlayerCharacter = Cast<AGu_Daoist_MasterCharacter>(GetPawn());
+    if (!PlayerCharacter || !LastGeneratedGuEntityId.IsValid())
+    {
+        ClientMessage(TEXT("GuUseLastGenerated: no generated Gu is currently selected."));
+        return;
+    }
+
+    const bool bActivated = PlayerCharacter->ActivateGuEntity(LastGeneratedGuEntityId);
+    ClientMessage(FString::Printf(
+        TEXT("GuUseLastGenerated: %s (%s)"),
+        bActivated ? TEXT("activated") : TEXT("activation failed"),
+        *LastGeneratedGuEntityId.ToString()));
 }
 
 void AGu_Daoist_MasterPlayerController::SetupInputComponent()

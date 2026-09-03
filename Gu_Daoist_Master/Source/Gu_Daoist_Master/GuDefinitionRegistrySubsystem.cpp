@@ -5,6 +5,46 @@
 
 namespace
 {
+    void AppendCanonicalNameArray(FString& Out, const TCHAR* Label, TArray<FName> Values)
+    {
+        Values.Sort([](const FName A, const FName B) { return A.ToString() < B.ToString(); });
+        Out += Label;
+        Out += TEXT("=");
+        for (const FName Value : Values)
+        {
+            Out += Value.ToString().ToLower();
+            Out += TEXT(",");
+        }
+        Out += TEXT("|");
+    }
+
+    void AppendCanonicalScoreMap(FString& Out, const TCHAR* Label, const TMap<FName, float>& Scores)
+    {
+        TArray<FString> Parts;
+        Parts.Reserve(Scores.Num());
+        for (const TPair<FName, float>& Pair : Scores)
+        {
+            Parts.Add(FString::Printf(TEXT("%s=%.6f"), *Pair.Key.ToString().ToLower(), Pair.Value));
+        }
+        Parts.Sort();
+        Out += Label;
+        Out += TEXT("=");
+        Out += FString::Join(Parts, TEXT(","));
+        Out += TEXT("|");
+    }
+
+    uint64 HashCanonicalSpeciesString(const FString& Text)
+    {
+        uint64 Hash = 1469598103934665603ull;
+        FTCHARToUTF8 Utf8(*Text);
+        for (int32 Index = 0; Index < Utf8.Length(); ++Index)
+        {
+            Hash ^= static_cast<uint8>(Utf8.Get()[Index]);
+            Hash *= 1099511628211ull;
+        }
+        return Hash;
+    }
+
     FName GameplayTagLeaf(const FGameplayTag& Tag)
     {
         if (!Tag.IsValid()) return NAME_None;
@@ -81,6 +121,12 @@ bool UGuDefinitionRegistrySubsystem::BuildRecordFromAsset(
     Record.Rank = FMath::Clamp(Asset->Rank, 1, 9);
     Record.Kind = Record.Rank >= 6 ? EGuKind::Immortal : EGuKind::Mortal;
     Record.Path = GameplayTagLeaf(Asset->Path);
+    for (const FGameplayTag& SecondaryPathTag : Asset->SecondaryPaths.GetGameplayTagArray())
+    {
+        const FName SecondaryPath = GameplayTagLeaf(SecondaryPathTag);
+        if (!SecondaryPath.IsNone() && SecondaryPath != Record.Path) Record.SecondaryPaths.AddUnique(SecondaryPath);
+    }
+    Record.PathRelation = Record.SecondaryPaths.IsEmpty() ? TEXT("Pure-path Gu") : TEXT("Multi-path Gu");
     Record.Category = TEXT("Authored Gu");
     Record.Description = FString::Printf(TEXT("Authored Gu definition from %s."), *Asset->GetPathName());
     Record.ActivationModel = Asset->ActivationModel;
@@ -811,6 +857,7 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinition(
     if (!ValidateAndNormalize(Clean, OutError)) return false;
 
     const FString NewNameKey = NameKey(Clean.Name);
+    FString OldFingerprint;
     if (const FGuDefinitionRecord* ExistingById = DefinitionsById.Find(Clean.Id))
     {
         if (!bReplaceExisting)
@@ -819,6 +866,10 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinition(
             return false;
         }
         IdByName.Remove(NameKey(ExistingById->Name));
+        if (ExistingById->bCustom)
+        {
+            OldFingerprint = ComputeRuntimeSpeciesFingerprint(*ExistingById);
+        }
     }
 
     if (const FName* ExistingNameId = IdByName.Find(NewNameKey))
@@ -831,9 +882,39 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinition(
         if (*ExistingNameId != Clean.Id) DefinitionsById.Remove(*ExistingNameId);
     }
 
+    FString NewFingerprint;
+    if (Clean.bCustom)
+    {
+        NewFingerprint = ComputeRuntimeSpeciesFingerprint(Clean);
+        if (const FName* ExistingFingerprintId = RuntimeIdByFingerprint.Find(NewFingerprint))
+        {
+            if (*ExistingFingerprintId != Clean.Id)
+            {
+                OutError = FString::Printf(
+                    TEXT("Runtime Gu '%s' duplicates canonical species '%s'. Reuse the existing species instead of registering another definition."),
+                    *Clean.Id.ToString(),
+                    *ExistingFingerprintId->ToString());
+                return false;
+            }
+        }
+    }
+
+    if (!OldFingerprint.IsEmpty() && OldFingerprint != NewFingerprint)
+    {
+        RuntimeIdByFingerprint.Remove(OldFingerprint);
+    }
+
     DefinitionsById.Add(Clean.Id, Clean);
     IdByName.Add(NewNameKey, Clean.Id);
-    if (Clean.bCustom) RuntimeDefinitionIds.Add(Clean.Id);
+    if (Clean.bCustom)
+    {
+        RuntimeDefinitionIds.Add(Clean.Id);
+        RuntimeIdByFingerprint.Add(NewFingerprint, Clean.Id);
+    }
+    else
+    {
+        RuntimeDefinitionIds.Remove(Clean.Id);
+    }
     OutError.Reset();
     return true;
 }
@@ -850,7 +931,33 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinitionAsset(
     // Preserve the authored species bridge for systems that must execute the
     // original UGuDefinition mechanics (GAS, projectiles, killer moves).
     // Physical ECS state never mutates this shared DataAsset.
+    RuntimeAssetsById.Remove(Record.Id);
     AuthoredAssetsById.Add(Record.Id, const_cast<UGuDefinition*>(Asset));
+    return true;
+}
+
+bool UGuDefinitionRegistrySubsystem::RegisterRuntimeDefinitionAsset(
+    const FGuDefinitionRecord& Definition,
+    UGuDefinition* RuntimeAsset,
+    FString& OutError,
+    const bool bReplaceExisting)
+{
+    if (!IsValid(RuntimeAsset))
+    {
+        OutError = TEXT("Runtime Gu definition asset is null.");
+        return false;
+    }
+
+    FGuDefinitionRecord RuntimeRecord = Definition;
+    RuntimeRecord.bCustom = true;
+    if (RuntimeRecord.Id.IsNone()) RuntimeRecord.Id = DefinitionIdForAsset(RuntimeAsset);
+    RuntimeAsset->StableDefinitionId = RuntimeRecord.Id;
+
+    if (!RegisterDefinition(RuntimeRecord, OutError, bReplaceExisting)) return false;
+
+    AuthoredAssetsById.Remove(RuntimeRecord.Id);
+    RuntimeAssetsById.Add(RuntimeRecord.Id, RuntimeAsset);
+    OutError.Reset();
     return true;
 }
 
@@ -870,6 +977,10 @@ const UGuDefinition* UGuDefinitionRegistrySubsystem::FindDefinitionAsset(const F
     if (const TObjectPtr<UGuDefinition>* Asset = AuthoredAssetsById.Find(Definition->Id))
     {
         return Asset->Get();
+    }
+    if (const TObjectPtr<UGuDefinition>* RuntimeAsset = RuntimeAssetsById.Find(Definition->Id))
+    {
+        return RuntimeAsset->Get();
     }
 
     return nullptr;
@@ -901,6 +1012,90 @@ TArray<FGuDefinitionRecord> UGuDefinitionRegistrySubsystem::GetAllDefinitions() 
     return Out;
 }
 
+FString UGuDefinitionRegistrySubsystem::ComputeRuntimeSpeciesFingerprint(const FGuDefinitionRecord& Definition)
+{
+    FString Canonical;
+    Canonical.Reserve(2048);
+    Canonical += FString::Printf(
+        TEXT("rank=%d|kind=%d|path=%s|activation=%d|costmode=%d|cost=%.6f|unique=%d|"),
+        Definition.Rank,
+        static_cast<int32>(Definition.Kind),
+        *Definition.Path.ToString().ToLower(),
+        static_cast<int32>(Definition.ActivationModel),
+        static_cast<int32>(Definition.EssenceCostMode),
+        Definition.EssenceCost,
+        Definition.bUnique ? 1 : 0);
+
+    AppendCanonicalNameArray(Canonical, TEXT("secondary"), Definition.SecondaryPaths);
+    AppendCanonicalNameArray(Canonical, TEXT("refinementTraits"), Definition.RefinementTraits);
+
+    Canonical += FString::Printf(
+        TEXT("feeding=%s:%.6f|lifecycle=%d:%d:%d:%s|constraints=%d:%d:%d:%.6f:%.6f:%d|"),
+        *Definition.Feeding.FoodKey.ToString().ToLower(),
+        Definition.Feeding.IntervalHours,
+        Definition.Lifecycle.bConsumable ? 1 : 0,
+        static_cast<int32>(Definition.Lifecycle.ConsumeOn),
+        Definition.Lifecycle.Charges,
+        *Definition.Lifecycle.ConsumedForm,
+        Definition.IntrinsicConstraints.PrepareMs,
+        Definition.IntrinsicConstraints.bStationary ? 1 : 0,
+        Definition.IntrinsicConstraints.bContact ? 1 : 0,
+        Definition.IntrinsicConstraints.ContactRange,
+        Definition.IntrinsicConstraints.SelfCostLifePercent,
+        Definition.IntrinsicConstraints.bShortLived ? 1 : 0);
+
+    TArray<FString> Mechanics;
+    Mechanics.Reserve(Definition.Mechanics.Num());
+    for (const FGuMechanicSpec& Mechanic : Definition.Mechanics)
+    {
+        FString Config = Mechanic.ConfigJson;
+        Config.ReplaceInline(TEXT(" "), TEXT(""));
+        Config.ReplaceInline(TEXT("\t"), TEXT(""));
+        Config.ReplaceInline(TEXT("\r"), TEXT(""));
+        Config.ReplaceInline(TEXT("\n"), TEXT(""));
+        Mechanics.Add(Mechanic.Type.ToString().ToLower() + TEXT(":") + Config.ToLower());
+    }
+    Mechanics.Sort();
+    Canonical += TEXT("mechanics=") + FString::Join(Mechanics, TEXT(";")) + TEXT("|");
+
+    AppendCanonicalScoreMap(Canonical, TEXT("paths"), Definition.RefinementProfile.Paths);
+    AppendCanonicalScoreMap(Canonical, TEXT("properties"), Definition.RefinementProfile.Properties);
+    AppendCanonicalScoreMap(Canonical, TEXT("attributes"), Definition.RefinementProfile.Attributes);
+    AppendCanonicalScoreMap(Canonical, TEXT("traits"), Definition.RefinementProfile.Traits);
+    AppendCanonicalScoreMap(Canonical, TEXT("templates"), Definition.RefinementProfile.Templates);
+    Canonical += FString::Printf(TEXT("daomass=%.6f|"), Definition.RefinementProfile.DaoMass);
+
+    Canonical += FString::Printf(
+        TEXT("assist=%d:%.6f:%.6f:%.6f:%.6f:%d|"),
+        Definition.RefinementAssistance.bEnabled ? 1 : 0,
+        Definition.RefinementAssistance.ProgressPercent,
+        Definition.RefinementAssistance.StabilityPerAction,
+        Definition.RefinementAssistance.ImpurityReductionPerAction,
+        Definition.RefinementAssistance.QualityBonus,
+        Definition.RefinementAssistance.ActionUses);
+    AppendCanonicalNameArray(Canonical, TEXT("assistProcesses"), Definition.RefinementAssistance.Processes);
+
+    const uint64 Hash = HashCanonicalSpeciesString(Canonical);
+    return LexToString(Hash);
+}
+
+bool UGuDefinitionRegistrySubsystem::FindEquivalentRuntimeDefinition(
+    const FGuDefinitionRecord& Definition,
+    FName& OutDefinitionId) const
+{
+    OutDefinitionId = NAME_None;
+    const FString Fingerprint = ComputeRuntimeSpeciesFingerprint(Definition);
+    if (const FName* Found = RuntimeIdByFingerprint.Find(Fingerprint))
+    {
+        if (DefinitionsById.Contains(*Found))
+        {
+            OutDefinitionId = *Found;
+            return true;
+        }
+    }
+    return false;
+}
+
 TArray<FGuDefinitionRecord> UGuDefinitionRegistrySubsystem::GetRuntimeDefinitions() const
 {
     TArray<FGuDefinitionRecord> Out;
@@ -925,6 +1120,8 @@ void UGuDefinitionRegistrySubsystem::ClearRuntimeDefinitions()
             IdByName.Remove(NameKey(Found->Name));
         }
         DefinitionsById.Remove(Id);
+        RuntimeAssetsById.Remove(Id);
     }
     RuntimeDefinitionIds.Reset();
+    RuntimeIdByFingerprint.Reset();
 }

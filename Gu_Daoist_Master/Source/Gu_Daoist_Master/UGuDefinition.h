@@ -598,12 +598,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu")
     int32 Rank = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Path",
-        meta = (Categories = "Data.Paths"))
-    FGameplayTag PrimaryPath;
+    /** Canonical primary Gu path. Project convention: Data.Paths.<PathName>. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Path", meta = (Categories = "Data.Paths"))
+    FGameplayTag Path;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Path",
-        meta = (Categories = "Data.Paths"))
+    /** Optional additional Dao paths for genuinely multi-path Gu. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu|Path", meta = (Categories = "Data.Paths"))
     FGameplayTagContainer SecondaryPaths;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gu")

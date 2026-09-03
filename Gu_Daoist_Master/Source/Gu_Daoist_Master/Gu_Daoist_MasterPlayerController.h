@@ -51,6 +51,14 @@ public:
     UFUNCTION(BlueprintCallable, Category="Gu|HUD") void ToggleGuHUDTab(EGuHUDTab Tab);
     UFUNCTION(BlueprintPure, Category="Gu|HUD") EGuHUDTab GetActiveGuHUDTab() const { return ActiveGuHUDTab; }
 
+    /** Console harness: GuGenerate Data.Paths.Moon 1 12345 Offense */
+    UFUNCTION(Exec)
+    void GuGenerate(FString PathTag, int32 Rank, int32 Seed, FString RoleText);
+
+    /** Activates the most recently generated physical Gu. */
+    UFUNCTION(Exec)
+    void GuUseLastGenerated();
+
 protected:
     UPROPERTY(EditAnywhere, Category="Input|Input Mappings")
     TArray<UInputMappingContext*> DefaultMappingContexts;
@@ -89,7 +97,10 @@ protected:
 
 private:
     EGuHUDTab ActiveGuHUDTab = EGuHUDTab::None;
+    FGuid LastGeneratedGuEntityId;
     void ApplyGuHUDTabVisibility();
+    void ExecuteGuGenerate(const FString& PathTag, int32 Rank, int32 Seed, const FString& RoleText);
+    void ExecuteUseLastGenerated();
 
     void RequestRefinementVerb(ERefinementVerb Verb);
     void ExecuteRefinementVerb(ERefinementVerb Verb);
@@ -140,4 +151,10 @@ private:
 
     UFUNCTION(Server, Reliable)
     void ServerCancelKillerMove();
+
+    UFUNCTION(Server, Reliable)
+    void ServerGuGenerate(const FString& PathTag, int32 Rank, int32 Seed, const FString& RoleText);
+
+    UFUNCTION(Server, Reliable)
+    void ServerUseLastGenerated();
 };
