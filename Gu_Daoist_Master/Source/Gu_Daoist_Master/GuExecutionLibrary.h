@@ -1,7 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
-
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -15,20 +12,20 @@ class UGuSystemConfig;
 UCLASS()
 class GU_DAOIST_MASTER_API UGuExecutionLibrary : public UBlueprintFunctionLibrary
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
+    /** Executes payload mechanics that apply when a carrier reaches a target. */
+    static bool ExecuteImpact(
+        UGuDefinition* GuDefinition,
+        UAbilitySystemComponent* SourceASC,
+        AActor* TargetActor,
+        const FHitResult& HitResult);
 
-	static bool ExecuteImpact(
-		UGuDefinition* GuDefinition,
-		UAbilitySystemComponent* SourceASC,
-		AActor* TargetActor,
-		const FHitResult& HitResult
-	);
-	static bool ExecuteActivation(
-		UGuDefinition* GuDefinition,
-		UAbilitySystemComponent* SourceASC,
-		AActor* SourceActor,
-		const UGuSystemConfig* SystemConfig
-	);
+    /** Executes self effects and instant non-projectile carriers such as melee/area. */
+    static bool ExecuteActivation(
+        UGuDefinition* GuDefinition,
+        UAbilitySystemComponent* SourceASC,
+        AActor* SourceActor,
+        const UGuSystemConfig* SystemConfig);
 };

@@ -169,6 +169,66 @@ void ApplyTemplateSemantics(FRefinementSemanticProfile& Profile, const FString& 
         AddSemanticScore(Profile.Attributes, TEXT("suppression"), .8f);
         AddSemanticScore(Profile.Attributes, TEXT("persistence"), .4f);
     }
+    else if (T == TEXT("damage_over_time"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("persistence"), .8f);
+        AddSemanticScore(Profile.Attributes, TEXT("timed"), .65f);
+    }
+    else if (T == TEXT("heal_over_time"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("recovery"), .8f);
+        AddSemanticScore(Profile.Attributes, TEXT("persistence"), .65f);
+    }
+    else if (T == TEXT("essence"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("recovery"), .55f);
+        AddSemanticScore(Profile.Attributes, TEXT("efficiency"), .45f);
+    }
+    else if (T == TEXT("field"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("area"), .9f);
+        AddSemanticScore(Profile.Attributes, TEXT("persistence"), .85f);
+        AddSemanticScore(Profile.Traits, TEXT("stationary"), .35f);
+    }
+    else if (T == TEXT("chain"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("link"), .9f);
+        AddSemanticScore(Profile.Attributes, TEXT("tracking"), .45f);
+    }
+    else if (T == TEXT("mark"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("link"), .95f);
+        AddSemanticScore(Profile.Attributes, TEXT("precision"), .65f);
+        AddSemanticScore(Profile.Traits, TEXT("target_specific"), .7f);
+    }
+    else if (T == TEXT("cleanse"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("recovery"), .6f);
+        AddSemanticScore(Profile.Attributes, TEXT("precision"), .45f);
+    }
+    else if (T == TEXT("dispel") || T == TEXT("gu_suppression"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("suppression"), .85f);
+        AddSemanticScore(Profile.Attributes, TEXT("precision"), .35f);
+    }
+    else if (T == TEXT("mental"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("stability"), .45f);
+        AddSemanticScore(Profile.Attributes, TEXT("precision"), .45f);
+        AddSemanticScore(Profile.Attributes, TEXT("link"), .35f);
+    }
+    else if (T == TEXT("refinement"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("precision"), .8f);
+        AddSemanticScore(Profile.Attributes, TEXT("stability"), .75f);
+        AddSemanticScore(Profile.Attributes, TEXT("efficiency"), .4f);
+    }
+    else if (T == TEXT("summon"))
+    {
+        AddSemanticScore(Profile.Attributes, TEXT("link"), .75f);
+        AddSemanticScore(Profile.Attributes, TEXT("persistence"), .55f);
+        AddSemanticScore(Profile.Attributes, TEXT("area"), .2f);
+    }
 
     if (bMaintained)
     {
@@ -208,7 +268,19 @@ FString TemplateForMechanic(const FString& Type, const TSharedPtr<FJsonObject>& 
     if (T == TEXT("reveal") || T == TEXT("custom_reveal")) return TEXT("reveal");
     if (T == TEXT("amp") || T == TEXT("essence_regeneration") || T == TEXT("cultivation_channel")) return TEXT("amplifier");
     if (T == TEXT("stat_modifier")) return TEXT("buff");
+    if (T == TEXT("damage_over_time")) return TEXT("damage_over_time");
+    if (T == TEXT("heal_over_time")) return TEXT("heal_over_time");
+    if (T == TEXT("essence_change") || T == TEXT("essence_regeneration")) return TEXT("essence");
+    if (T == TEXT("displacement")) return TEXT("movement");
+    if (T == TEXT("gu_suppression")) return TEXT("gu_suppression");
+    if (T == TEXT("cleanse")) return TEXT("cleanse");
+    if (T == TEXT("dispel")) return TEXT("dispel");
+    if (T == TEXT("field")) return TEXT("field");
+    if (T == TEXT("chain")) return TEXT("chain");
+    if (T == TEXT("mark")) return TEXT("mark");
+    if (T == TEXT("multitasking_boost")) return TEXT("mental");
     if (T == TEXT("refinement_assistance")) return TEXT("refinement");
+    if (T == TEXT("summon")) return TEXT("summon");
     return FString();
 }
 
@@ -374,6 +446,29 @@ FRefinementSemanticProfile UGuRulesLibrary::BuildDefaultGuRefinementProfile(cons
             else if (Stat == TEXT("healing") || Stat == TEXT("essence_regeneration")) AddSemanticScore(Profile.Attributes, TEXT("recovery"), .7f);
             else if (Stat == TEXT("essence_efficiency")) AddSemanticScore(Profile.Attributes, TEXT("efficiency"), .8f);
             else if (Stat == TEXT("investigation")) AddSemanticScore(Profile.Attributes, TEXT("precision"), .65f);
+        }
+        else if (LowerType == TEXT("damage_over_time"))
+        {
+            AddSemanticScore(Profile.Attributes, TEXT("persistence"), .35f);
+            AddSemanticScore(Profile.Attributes, TEXT("timed"), .35f);
+        }
+        else if (LowerType == TEXT("field"))
+        {
+            AddSemanticScore(Profile.Attributes, TEXT("area"), .45f);
+            AddSemanticScore(Profile.Attributes, TEXT("duration"), .35f);
+        }
+        else if (LowerType == TEXT("chain") || LowerType == TEXT("mark"))
+        {
+            AddSemanticScore(Profile.Attributes, TEXT("link"), .55f);
+        }
+        else if (LowerType == TEXT("gu_suppression") || LowerType == TEXT("dispel"))
+        {
+            AddSemanticScore(Profile.Attributes, TEXT("suppression"), .45f);
+        }
+        else if (LowerType == TEXT("refinement_assistance"))
+        {
+            AddSemanticScore(Profile.Attributes, TEXT("precision"), .5f);
+            AddSemanticScore(Profile.Attributes, TEXT("stability"), .4f);
         }
     }
 

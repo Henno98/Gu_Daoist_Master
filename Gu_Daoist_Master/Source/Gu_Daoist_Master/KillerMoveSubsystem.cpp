@@ -13,6 +13,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Engine/GameInstance.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
@@ -20,6 +21,7 @@
 #include "GuDefinitionRegistrySubsystem.h"
 #include "GuEntitySubsystem.h"
 #include "GuPlayerState.h"
+#include "GuRuntimeEffectComponent.h"
 #include "Gu_Projectile.h"
 #include "KillerMoveDefinition.h"
 #include "MentalResourceComponent.h"
@@ -175,6 +177,14 @@ namespace
                 Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("damage"), Definition.EffectProfile.Magnitude);
                 Effect.Detail = FString::Printf(TEXT("%.1f damage."), Effect.Magnitude);
             }
+            else if (Mechanic.Type == TEXT("damage_over_time"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::DamageOverTime;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("damagePerTick"));
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("tickInterval"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("%.1f damage every %.2fs for %.1fs."), Effect.Magnitude, Effect.Range, Effect.SecondaryMagnitude);
+            }
             else if (Mechanic.Type == TEXT("knockback"))
             {
                 Effect.Type = EKillerMoveConcreteEffectType::Knockback;
@@ -184,6 +194,155 @@ namespace
                     TEXT("%.0f knockback (vertical %.0f)."),
                     Effect.Magnitude,
                     Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("displacement"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Displacement;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("strength"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("verticalStrength"));
+                Effect.Detail = FString::Printf(TEXT("Displacement %.0f (vertical %.0f)."), Effect.Magnitude, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("melee"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::MeleeCarrier;
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("range"), Definition.EffectProfile.Range);
+                Effect.Radius = KillerMoveRuntimeJsonNumber(Json, TEXT("radius"));
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("arcDegrees"));
+                Effect.Detail = FString::Printf(TEXT("Melee carrier: range %.0f, radius %.0f."), Effect.Range, Effect.Radius);
+            }
+            else if (Mechanic.Type == TEXT("area"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::AreaCarrier;
+                Effect.Radius = KillerMoveRuntimeJsonNumber(Json, TEXT("radius"), Definition.EffectProfile.Area);
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("forwardOffset"));
+                Effect.Detail = FString::Printf(TEXT("Area carrier: radius %.0f."), Effect.Radius);
+            }
+            else if (Mechanic.Type == TEXT("field"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::FieldCarrier;
+                Effect.Radius = KillerMoveRuntimeJsonNumber(Json, TEXT("radius"), Definition.EffectProfile.Area);
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("forwardOffset"));
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("tickInterval"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Field: radius %.0f, pulse %.2fs for %.1fs."), Effect.Radius, Effect.Magnitude, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("heal"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Heal;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("amount"));
+                Effect.Detail = FString::Printf(TEXT("%.1f healing."), Effect.Magnitude);
+            }
+            else if (Mechanic.Type == TEXT("heal_over_time"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::HealOverTime;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("healPerTick"));
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("tickInterval"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("%.1f healing every %.2fs for %.1fs."), Effect.Magnitude, Effect.Range, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("shield"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Shield;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("amount"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("%.1f shield for %.1fs."), Effect.Magnitude, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("movement"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Movement;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("speedMultiplier"), 1.0f);
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("blinkDistance"));
+                Effect.Detail = FString::Printf(TEXT("Movement effect x%.2f."), Effect.Magnitude);
+            }
+            else if (Mechanic.Type == TEXT("restriction"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Restriction;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("movementMultiplier"), 1.0f);
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Restriction x%.2f for %.1fs."), Effect.Magnitude, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("gu_suppression"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::GuSuppression;
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Gu suppression for %.1fs."), Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("essence_change"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::EssenceChange;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("amount"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("mode"));
+                Effect.Detail = FString::Printf(TEXT("Primeval essence change %.1f."), Effect.Magnitude);
+            }
+            else if (Mechanic.Type == TEXT("essence_regeneration"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::EssenceRegeneration;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("flatPerSecond"));
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("percentPerSecond"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Essence regeneration %.1f/s + %.2f%%/s for %.1fs."), Effect.Magnitude, Effect.Range, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("cleanse"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Cleanse;
+                Effect.Detail = TEXT("Cleanse harmful Gu states.");
+            }
+            else if (Mechanic.Type == TEXT("dispel"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Dispel;
+                Effect.Detail = TEXT("Dispel beneficial Gu states.");
+            }
+            else if (Mechanic.Type == TEXT("conceal"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Concealment;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("detectionResistance"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Concealment %.0f%% for %.1fs."), Effect.Magnitude * 100.0f, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("reveal"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Reveal;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("strength"), 1.0f);
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("range"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Reveal range %.0f for %.1fs."), Effect.Range, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("chain"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Chain;
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("jumpRadius"));
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("maxAdditionalTargets"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("magnitudeFalloff"), 1.0f);
+                Effect.Detail = FString::Printf(TEXT("Chain to %.0f additional targets within %.0f."), Effect.Magnitude, Effect.Range);
+            }
+            else if (Mechanic.Type == TEXT("mark"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Mark;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("strength"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("Mark %s strength %.2f for %.1fs."), *KillerMoveRuntimeJsonString(Json, TEXT("markId")), Effect.Magnitude, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("multitasking_boost"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::AttentionBoost;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("slotsGranted"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("duration"));
+                Effect.Detail = FString::Printf(TEXT("+%.0f attention slots for %.1fs."), Effect.Magnitude, Effect.SecondaryMagnitude);
+            }
+            else if (Mechanic.Type == TEXT("refinement_assistance"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::RefinementAssist;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("progressPercent"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("qualityBonus"));
+                Effect.Detail = FString::Printf(TEXT("Refinement assistance: +%.1f%% progress."), Effect.Magnitude);
+            }
+            else if (Mechanic.Type == TEXT("summon"))
+            {
+                Effect.Type = EKillerMoveConcreteEffectType::Summon;
+                Effect.Magnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("count"), 1.0f);
+                Effect.Range = KillerMoveRuntimeJsonNumber(Json, TEXT("spawnRadius"));
+                Effect.SecondaryMagnitude = KillerMoveRuntimeJsonNumber(Json, TEXT("lifetime"));
+                Effect.Detail = FString::Printf(TEXT("Summon %.0f x %s."), Effect.Magnitude, *KillerMoveRuntimeJsonString(Json, TEXT("actorClass")));
             }
             else if (Mechanic.Type == TEXT("stat_modifier"))
             {
@@ -209,10 +368,33 @@ namespace
     FString KillerMoveRuntimeEffectPreview(const FKillerMoveEffectGraph& Graph)
     {
         int32 Projectiles = 0;
+        int32 MeleeCarriers = 0;
+        int32 AreaCarriers = 0;
+        int32 FieldCarriers = 0;
         int32 Damage = 0;
+        int32 DamageOverTime = 0;
         int32 Knockback = 0;
+        int32 Displacement = 0;
+        int32 Healing = 0;
+        int32 HealingOverTime = 0;
+        int32 Shields = 0;
+        int32 Movement = 0;
+        int32 Restrictions = 0;
+        int32 GuSuppression = 0;
+        int32 EssenceEffects = 0;
+        int32 Cleanses = 0;
+        int32 Dispels = 0;
+        int32 Chains = 0;
+        int32 Marks = 0;
+        int32 AttentionBoosts = 0;
+        int32 RefinementAssists = 0;
+        int32 Summons = 0;
+        int32 Concealment = 0;
+        int32 Reveal = 0;
         int32 Buffs = 0;
         float TotalDamage = 0.0f;
+        float TotalHealing = 0.0f;
+        float TotalShield = 0.0f;
         float StrongestKnockback = 0.0f;
 
         for (const FKillerMoveEffectNode& Node : Graph.Nodes)
@@ -224,13 +406,79 @@ namespace
                 case EKillerMoveConcreteEffectType::ProjectileCarrier:
                     ++Projectiles;
                     break;
+                case EKillerMoveConcreteEffectType::MeleeCarrier:
+                    ++MeleeCarriers;
+                    break;
+                case EKillerMoveConcreteEffectType::AreaCarrier:
+                    ++AreaCarriers;
+                    break;
+                case EKillerMoveConcreteEffectType::FieldCarrier:
+                    ++FieldCarriers;
+                    break;
                 case EKillerMoveConcreteEffectType::Damage:
                     ++Damage;
                     TotalDamage += FMath::Max(0.0f, Effect.Magnitude);
                     break;
+                case EKillerMoveConcreteEffectType::DamageOverTime:
+                    ++DamageOverTime;
+                    break;
                 case EKillerMoveConcreteEffectType::Knockback:
                     ++Knockback;
                     StrongestKnockback = FMath::Max(StrongestKnockback, Effect.Magnitude);
+                    break;
+                case EKillerMoveConcreteEffectType::Displacement:
+                    ++Displacement;
+                    break;
+                case EKillerMoveConcreteEffectType::Heal:
+                    ++Healing;
+                    TotalHealing += FMath::Max(0.0f, Effect.Magnitude);
+                    break;
+                case EKillerMoveConcreteEffectType::HealOverTime:
+                    ++HealingOverTime;
+                    break;
+                case EKillerMoveConcreteEffectType::Shield:
+                    ++Shields;
+                    TotalShield += FMath::Max(0.0f, Effect.Magnitude);
+                    break;
+                case EKillerMoveConcreteEffectType::Movement:
+                    ++Movement;
+                    break;
+                case EKillerMoveConcreteEffectType::Restriction:
+                    ++Restrictions;
+                    break;
+                case EKillerMoveConcreteEffectType::GuSuppression:
+                    ++GuSuppression;
+                    break;
+                case EKillerMoveConcreteEffectType::EssenceChange:
+                case EKillerMoveConcreteEffectType::EssenceRegeneration:
+                    ++EssenceEffects;
+                    break;
+                case EKillerMoveConcreteEffectType::Cleanse:
+                    ++Cleanses;
+                    break;
+                case EKillerMoveConcreteEffectType::Dispel:
+                    ++Dispels;
+                    break;
+                case EKillerMoveConcreteEffectType::Chain:
+                    ++Chains;
+                    break;
+                case EKillerMoveConcreteEffectType::Mark:
+                    ++Marks;
+                    break;
+                case EKillerMoveConcreteEffectType::AttentionBoost:
+                    ++AttentionBoosts;
+                    break;
+                case EKillerMoveConcreteEffectType::RefinementAssist:
+                    ++RefinementAssists;
+                    break;
+                case EKillerMoveConcreteEffectType::Summon:
+                    ++Summons;
+                    break;
+                case EKillerMoveConcreteEffectType::Concealment:
+                    ++Concealment;
+                    break;
+                case EKillerMoveConcreteEffectType::Reveal:
+                    ++Reveal;
                     break;
                 case EKillerMoveConcreteEffectType::StatModifier:
                     ++Buffs;
@@ -243,8 +491,29 @@ namespace
 
         TArray<FString> Parts;
         if (Projectiles > 0) Parts.Add(TEXT("projectile carrier"));
+        if (MeleeCarriers > 0) Parts.Add(TEXT("melee carrier"));
+        if (AreaCarriers > 0) Parts.Add(TEXT("area carrier"));
+        if (FieldCarriers > 0) Parts.Add(TEXT("persistent field"));
         if (Damage > 0) Parts.Add(FString::Printf(TEXT("%.1f raw damage payload"), TotalDamage));
+        if (DamageOverTime > 0) Parts.Add(TEXT("damage over time"));
         if (Knockback > 0) Parts.Add(FString::Printf(TEXT("%.0f knockback"), StrongestKnockback));
+        if (Displacement > 0) Parts.Add(TEXT("displacement"));
+        if (Healing > 0) Parts.Add(FString::Printf(TEXT("%.1f healing"), TotalHealing));
+        if (HealingOverTime > 0) Parts.Add(TEXT("healing over time"));
+        if (Shields > 0) Parts.Add(FString::Printf(TEXT("%.1f shield"), TotalShield));
+        if (Movement > 0) Parts.Add(TEXT("movement"));
+        if (Restrictions > 0) Parts.Add(TEXT("restriction"));
+        if (GuSuppression > 0) Parts.Add(TEXT("Gu suppression"));
+        if (EssenceEffects > 0) Parts.Add(TEXT("essence manipulation"));
+        if (Cleanses > 0) Parts.Add(TEXT("cleanse"));
+        if (Dispels > 0) Parts.Add(TEXT("dispel"));
+        if (Chains > 0) Parts.Add(TEXT("chain delivery"));
+        if (Marks > 0) Parts.Add(TEXT("target mark"));
+        if (AttentionBoosts > 0) Parts.Add(TEXT("attention boost"));
+        if (RefinementAssists > 0) Parts.Add(TEXT("refinement assistance"));
+        if (Summons > 0) Parts.Add(TEXT("summon"));
+        if (Concealment > 0) Parts.Add(TEXT("concealment"));
+        if (Reveal > 0) Parts.Add(TEXT("investigation/reveal"));
         if (Buffs > 0) Parts.Add(FString::Printf(TEXT("%d stat modifier%s"), Buffs, Buffs == 1 ? TEXT("") : TEXT("s")));
         return Parts.IsEmpty() ? TEXT("No concrete executable effect is compiled yet.") : FString::Join(Parts, TEXT(" | "));
     }
@@ -277,7 +546,22 @@ namespace
         if (!Definition) return false;
         for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
         {
-            if (Mechanic.GetPtr<FGuDamageMechanic>() || Mechanic.GetPtr<FGuKnockbackMechanic>()) return true;
+            if (Mechanic.GetPtr<FGuDamageMechanic>()
+                || Mechanic.GetPtr<FGuKnockbackMechanic>()
+                || Mechanic.GetPtr<FGuDisplacementMechanic>()
+                || Mechanic.GetPtr<FGuRestrictionMechanic>()
+                || Mechanic.GetPtr<FGuGuSuppressionMechanic>()
+                || Mechanic.GetPtr<FGuChainMechanic>()
+                || Mechanic.GetPtr<FGuMarkMechanic>()) return true;
+            if (const FGuHealMechanic* Value = Mechanic.GetPtr<FGuHealMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuShieldMechanic* Value = Mechanic.GetPtr<FGuShieldMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuMovementMechanic* Value = Mechanic.GetPtr<FGuMovementMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuDamageOverTimeMechanic* Value = Mechanic.GetPtr<FGuDamageOverTimeMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuHealOverTimeMechanic* Value = Mechanic.GetPtr<FGuHealOverTimeMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuEssenceChangeMechanic* Value = Mechanic.GetPtr<FGuEssenceChangeMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuEssenceRegenerationMechanic* Value = Mechanic.GetPtr<FGuEssenceRegenerationMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuCleanseMechanic* Value = Mechanic.GetPtr<FGuCleanseMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
+            if (const FGuDispelMechanic* Value = Mechanic.GetPtr<FGuDispelMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::ImpactTarget) return true;
         }
         return false;
     }
@@ -287,7 +571,31 @@ namespace
         if (!Definition) return false;
         for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
         {
-            if (Mechanic.GetPtr<FGuBuffMechanic>()) return true;
+            if (Mechanic.GetPtr<FGuBuffMechanic>()
+                || Mechanic.GetPtr<FGuConcealmentMechanic>()
+                || Mechanic.GetPtr<FGuRevealMechanic>()
+                || Mechanic.GetPtr<FGuAttentionBoostMechanic>()
+                || Mechanic.GetPtr<FGuFieldMechanic>()
+                || Mechanic.GetPtr<FGuSummonMechanic>()) return true;
+            if (const FGuHealMechanic* Value = Mechanic.GetPtr<FGuHealMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuShieldMechanic* Value = Mechanic.GetPtr<FGuShieldMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuMovementMechanic* Value = Mechanic.GetPtr<FGuMovementMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuDamageOverTimeMechanic* Value = Mechanic.GetPtr<FGuDamageOverTimeMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuHealOverTimeMechanic* Value = Mechanic.GetPtr<FGuHealOverTimeMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuEssenceChangeMechanic* Value = Mechanic.GetPtr<FGuEssenceChangeMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuEssenceRegenerationMechanic* Value = Mechanic.GetPtr<FGuEssenceRegenerationMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuCleanseMechanic* Value = Mechanic.GetPtr<FGuCleanseMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+            if (const FGuDispelMechanic* Value = Mechanic.GetPtr<FGuDispelMechanic>(); Value && Value->Recipient == EGuMechanicRecipient::Self) return true;
+        }
+        return false;
+    }
+
+    bool KillerMoveRuntimeHasFieldCarrier(const UGuDefinition* Definition)
+    {
+        if (!Definition) return false;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (Mechanic.GetPtr<FGuFieldMechanic>()) return true;
         }
         return false;
     }
@@ -667,6 +975,18 @@ bool UKillerMoveSubsystem::BeginKillerMove(AGuPlayerState* PlayerState, const FK
         return false;
     }
 
+    if (const AController* OwningController = Cast<AController>(PlayerState->GetOwner()))
+    {
+        if (const APawn* Pawn = OwningController->GetPawn())
+        {
+            if (const UGuRuntimeEffectComponent* Runtime = Pawn->FindComponentByClass<UGuRuntimeEffectComponent>(); Runtime && Runtime->IsGuSuppressed())
+            {
+                OutError = TEXT("Gu suppression prevents killer-move formation.");
+                return false;
+            }
+        }
+    }
+
     FKillerMoveDefinitionRecord Compiled = Definition;
     if (Compiled.Id.IsNone()) Compiled.Id = TEXT("runtime_killer_move");
     if (Compiled.Name.IsEmpty()) Compiled.Name = FText::FromName(Compiled.Id);
@@ -884,9 +1204,10 @@ bool UKillerMoveSubsystem::SubmitInput(AGuPlayerState* PlayerState, const int32 
         return true;
     }
 
-    PushPublicState(*Session, FString::Printf(
-        bStrainedTiming ? TEXT("Input strained but accepted (%+.0f ms).") : TEXT("Input accepted (%+.0f ms)."),
-        Offset * 1000.0f));
+    const FString TimingMessage = bStrainedTiming
+        ? FString::Printf(TEXT("Input strained but accepted (%+.0f ms)."), Offset * 1000.0f)
+        : FString::Printf(TEXT("Input accepted (%+.0f ms)."), Offset * 1000.0f);
+    PushPublicState(*Session, TimingMessage);
     if (AGuPlayerState* PS = Session->PlayerState.Get())
     {
         FKillerMovePublicState Public = PS->KillerMovePublicState;
@@ -1245,6 +1566,153 @@ bool UKillerMoveSubsystem::ResolveCompletedEffect(
             KillerMoveRuntimeAddMechanic(Composite, CombinedBuff);
             ++ActivationMechanics;
         }
+        else if (const FGuHealMechanic* Heal = Mechanic.GetPtr<FGuHealMechanic>())
+        {
+            FGuHealMechanic Combined = *Heal;
+            Combined.Amount *= PowerMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuShieldMechanic* Shield = Mechanic.GetPtr<FGuShieldMechanic>())
+        {
+            FGuShieldMechanic Combined = *Shield;
+            Combined.Amount *= PowerMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuMovementMechanic* Movement = Mechanic.GetPtr<FGuMovementMechanic>())
+        {
+            FGuMovementMechanic Combined = *Movement;
+            Combined.SpeedMultiplier = 1.0f + (Combined.SpeedMultiplier - 1.0f) * PowerMultiplier;
+            Combined.DashSpeed *= PowerMultiplier;
+            Combined.BlinkDistance *= RangeMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuRestrictionMechanic* Restriction = Mechanic.GetPtr<FGuRestrictionMechanic>())
+        {
+            FGuRestrictionMechanic Combined = *Restriction;
+            Combined.MovementMultiplier = FMath::Clamp(1.0f - (1.0f - Combined.MovementMultiplier) * PowerMultiplier, 0.0f, 1.0f);
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ImpactMechanics;
+        }
+        else if (const FGuDamageOverTimeMechanic* DamageOverTime = Mechanic.GetPtr<FGuDamageOverTimeMechanic>())
+        {
+            FGuDamageOverTimeMechanic Combined = *DamageOverTime;
+            Combined.DamagePerTick *= PowerMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuHealOverTimeMechanic* HealOverTime = Mechanic.GetPtr<FGuHealOverTimeMechanic>())
+        {
+            FGuHealOverTimeMechanic Combined = *HealOverTime;
+            Combined.HealPerTick *= PowerMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuEssenceChangeMechanic* Essence = Mechanic.GetPtr<FGuEssenceChangeMechanic>())
+        {
+            FGuEssenceChangeMechanic Combined = *Essence;
+            Combined.Amount *= PowerMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuEssenceRegenerationMechanic* Regen = Mechanic.GetPtr<FGuEssenceRegenerationMechanic>())
+        {
+            FGuEssenceRegenerationMechanic Combined = *Regen;
+            Combined.FlatPerSecond *= PowerMultiplier;
+            Combined.PercentOfMaximumPerSecond *= PowerMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            if (Combined.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuDisplacementMechanic* Displacement = Mechanic.GetPtr<FGuDisplacementMechanic>())
+        {
+            FGuDisplacementMechanic Combined = *Displacement;
+            Combined.Strength *= PowerMultiplier;
+            Combined.VerticalStrength *= PowerMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ImpactMechanics;
+        }
+        else if (const FGuGuSuppressionMechanic* Suppression = Mechanic.GetPtr<FGuGuSuppressionMechanic>())
+        {
+            FGuGuSuppressionMechanic Combined = *Suppression;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.20f, Quality) * PowerMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ImpactMechanics;
+        }
+        else if (const FGuCleanseMechanic* Cleanse = Mechanic.GetPtr<FGuCleanseMechanic>())
+        {
+            KillerMoveRuntimeAddMechanic(Composite, *Cleanse);
+            if (Cleanse->Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuDispelMechanic* Dispel = Mechanic.GetPtr<FGuDispelMechanic>())
+        {
+            KillerMoveRuntimeAddMechanic(Composite, *Dispel);
+            if (Dispel->Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+        }
+        else if (const FGuFieldMechanic* Field = Mechanic.GetPtr<FGuFieldMechanic>())
+        {
+            FGuFieldMechanic Combined = *Field;
+            Combined.Radius *= RadiusMultiplier;
+            Combined.ForwardOffset *= RangeMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ActivationMechanics;
+        }
+        else if (const FGuChainMechanic* Chain = Mechanic.GetPtr<FGuChainMechanic>())
+        {
+            FGuChainMechanic Combined = *Chain;
+            Combined.JumpRadius *= RangeMultiplier;
+            Combined.MaxAdditionalTargets = FMath::Max(1, FMath::RoundToInt(static_cast<float>(Combined.MaxAdditionalTargets) * FMath::Lerp(0.8f, 1.2f, Quality)));
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+        }
+        else if (const FGuMarkMechanic* Mark = Mechanic.GetPtr<FGuMarkMechanic>())
+        {
+            FGuMarkMechanic Combined = *Mark;
+            Combined.Strength *= PowerMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ImpactMechanics;
+        }
+        else if (const FGuAttentionBoostMechanic* Attention = Mechanic.GetPtr<FGuAttentionBoostMechanic>())
+        {
+            FGuAttentionBoostMechanic Combined = *Attention;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ActivationMechanics;
+        }
+        else if (const FGuSummonMechanic* Summon = Mechanic.GetPtr<FGuSummonMechanic>())
+        {
+            FGuSummonMechanic Combined = *Summon;
+            Combined.Count = FMath::Max(1, FMath::RoundToInt(static_cast<float>(Combined.Count) * FMath::Lerp(0.8f, 1.2f, Quality)));
+            Combined.SpawnRadius *= RadiusMultiplier;
+            Combined.ForwardOffset *= RangeMultiplier;
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ActivationMechanics;
+        }
+        else if (const FGuConcealmentMechanic* Concealment = Mechanic.GetPtr<FGuConcealmentMechanic>())
+        {
+            FGuConcealmentMechanic Combined = *Concealment;
+            Combined.DetectionResistance = FMath::Clamp(Combined.DetectionResistance * PowerMultiplier, 0.0f, 0.95f);
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ActivationMechanics;
+        }
+        else if (const FGuRevealMechanic* Reveal = Mechanic.GetPtr<FGuRevealMechanic>())
+        {
+            FGuRevealMechanic Combined = *Reveal;
+            Combined.Strength *= PowerMultiplier;
+            Combined.Range *= RangeMultiplier;
+            Combined.Duration *= FMath::Lerp(0.80f, 1.15f, Quality);
+            KillerMoveRuntimeAddMechanic(Composite, Combined);
+            ++ActivationMechanics;
+        }
     }
 
     // Supporting Gu contribute only the mechanics appropriate to their graph role.
@@ -1257,28 +1725,92 @@ bool UKillerMoveSubsystem::ResolveCompletedEffect(
 
         float ImpactWeight = 0.0f;
         float BuffWeight = 0.0f;
+        float RecoveryWeight = 0.0f;
+        float ShieldWeight = 0.0f;
+        float MovementWeight = 0.0f;
+        float ConcealmentWeight = 0.0f;
+        float RevealWeight = 0.0f;
+        float RestrictionWeight = 0.0f;
+        float PeriodicWeight = 0.0f;
+        float ControlWeight = 0.0f;
+        float ResourceWeight = 0.0f;
+        float CleanseWeight = 0.0f;
+        float FieldWeight = 0.0f;
+        float ChainWeight = 0.0f;
+        float MarkWeight = 0.0f;
+        float AttentionWeight = 0.0f;
+        float SummonWeight = 0.0f;
         switch (Role)
         {
         case EKillerMoveRole::Output:
             ImpactWeight = 0.65f;
+            PeriodicWeight = 0.65f;
+            ControlWeight = 0.35f;
             BuffWeight = 0.45f;
             break;
         case EKillerMoveRole::Suppression:
             ImpactWeight = 0.55f;
+            PeriodicWeight = 0.45f;
+            RestrictionWeight = 0.80f;
+            ControlWeight = 0.85f;
             break;
         case EKillerMoveRole::Amplification:
             ImpactWeight = 0.30f;
+            PeriodicWeight = 0.30f;
             BuffWeight = 0.55f;
+            ChainWeight = 0.40f;
             break;
         case EKillerMoveRole::Stabilization:
         case EKillerMoveRole::Safety:
         case EKillerMoveRole::Buffer:
-        case EKillerMoveRole::Recovery:
             BuffWeight = 0.75f;
+            ShieldWeight = 0.80f;
+            CleanseWeight = 0.60f;
+            AttentionWeight = 0.35f;
+            break;
+        case EKillerMoveRole::Recovery:
+            BuffWeight = 0.55f;
+            RecoveryWeight = 0.85f;
+            PeriodicWeight = 0.85f;
+            CleanseWeight = 0.75f;
+            ResourceWeight = 0.50f;
+            break;
+        case EKillerMoveRole::Medium:
+        case EKillerMoveRole::Routing:
+            MovementWeight = 0.70f;
+            ChainWeight = 0.45f;
+            break;
+        case EKillerMoveRole::Concealment:
+            ConcealmentWeight = 0.85f;
+            break;
+        case EKillerMoveRole::Targeting:
+        case EKillerMoveRole::InvestigationSensor:
+        case EKillerMoveRole::RecognitionValidation:
+            RevealWeight = 0.75f;
+            MarkWeight = 0.80f;
+            ChainWeight = 0.55f;
             break;
         case EKillerMoveRole::Control:
             ImpactWeight = 0.25f;
             BuffWeight = 0.35f;
+            RestrictionWeight = 0.50f;
+            ControlWeight = 0.65f;
+            MarkWeight = 0.40f;
+            break;
+        case EKillerMoveRole::Fuel:
+            ResourceWeight = 0.90f;
+            break;
+        case EKillerMoveRole::Link:
+            MarkWeight = 0.85f;
+            ChainWeight = 0.80f;
+            break;
+        case EKillerMoveRole::Boundary:
+        case EKillerMoveRole::Anchor:
+        case EKillerMoveRole::Storage:
+            FieldWeight = 0.80f;
+            break;
+        case EKillerMoveRole::Subordinate:
+            SummonWeight = 0.90f;
             break;
         default:
             break;
@@ -1316,6 +1848,211 @@ bool UKillerMoveSubsystem::ResolveCompletedEffect(
                     AddedBuff.Duration *= FMath::Lerp(0.80f, 1.10f, Quality);
                     KillerMoveRuntimeAddMechanic(Composite, AddedBuff);
                     ++ActivationMechanics;
+                    continue;
+                }
+            }
+
+            if (RecoveryWeight > 0.0f)
+            {
+                if (const FGuHealMechanic* Heal = Mechanic.GetPtr<FGuHealMechanic>())
+                {
+                    FGuHealMechanic Added = *Heal;
+                    Added.Amount *= RecoveryWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (ShieldWeight > 0.0f)
+            {
+                if (const FGuShieldMechanic* Shield = Mechanic.GetPtr<FGuShieldMechanic>())
+                {
+                    FGuShieldMechanic Added = *Shield;
+                    Added.Amount *= ShieldWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    Added.Duration *= FMath::Lerp(0.80f, 1.10f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (MovementWeight > 0.0f)
+            {
+                if (const FGuMovementMechanic* Movement = Mechanic.GetPtr<FGuMovementMechanic>())
+                {
+                    FGuMovementMechanic Added = *Movement;
+                    Added.SpeedMultiplier = 1.0f + (Added.SpeedMultiplier - 1.0f) * MovementWeight;
+                    Added.DashSpeed *= MovementWeight;
+                    Added.BlinkDistance *= MovementWeight;
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (ConcealmentWeight > 0.0f)
+            {
+                if (const FGuConcealmentMechanic* Concealment = Mechanic.GetPtr<FGuConcealmentMechanic>())
+                {
+                    FGuConcealmentMechanic Added = *Concealment;
+                    Added.DetectionResistance = FMath::Clamp(Added.DetectionResistance * ConcealmentWeight, 0.0f, 0.95f);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ActivationMechanics;
+                    continue;
+                }
+            }
+            if (RevealWeight > 0.0f)
+            {
+                if (const FGuRevealMechanic* Reveal = Mechanic.GetPtr<FGuRevealMechanic>())
+                {
+                    FGuRevealMechanic Added = *Reveal;
+                    Added.Strength *= RevealWeight;
+                    Added.Range *= FMath::Max(0.25f, RevealWeight);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ActivationMechanics;
+                    continue;
+                }
+            }
+            if (PeriodicWeight > 0.0f)
+            {
+                if (const FGuDamageOverTimeMechanic* Periodic = Mechanic.GetPtr<FGuDamageOverTimeMechanic>())
+                {
+                    FGuDamageOverTimeMechanic Added = *Periodic;
+                    Added.DamagePerTick *= PeriodicWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    Added.Duration *= FMath::Lerp(0.80f, 1.10f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+                if (const FGuHealOverTimeMechanic* Periodic = Mechanic.GetPtr<FGuHealOverTimeMechanic>())
+                {
+                    FGuHealOverTimeMechanic Added = *Periodic;
+                    Added.HealPerTick *= PeriodicWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    Added.Duration *= FMath::Lerp(0.80f, 1.10f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (ControlWeight > 0.0f)
+            {
+                if (const FGuDisplacementMechanic* Displacement = Mechanic.GetPtr<FGuDisplacementMechanic>())
+                {
+                    FGuDisplacementMechanic Added = *Displacement;
+                    Added.Strength *= ControlWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    Added.VerticalStrength *= ControlWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ImpactMechanics;
+                    continue;
+                }
+                if (const FGuGuSuppressionMechanic* Suppression = Mechanic.GetPtr<FGuGuSuppressionMechanic>())
+                {
+                    FGuGuSuppressionMechanic Added = *Suppression;
+                    Added.Duration *= ControlWeight * FMath::Lerp(0.85f, 1.10f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ImpactMechanics;
+                    continue;
+                }
+                if (const FGuDispelMechanic* Dispel = Mechanic.GetPtr<FGuDispelMechanic>())
+                {
+                    KillerMoveRuntimeAddMechanic(Composite, *Dispel);
+                    if (Dispel->Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (ResourceWeight > 0.0f)
+            {
+                if (const FGuEssenceChangeMechanic* Essence = Mechanic.GetPtr<FGuEssenceChangeMechanic>())
+                {
+                    FGuEssenceChangeMechanic Added = *Essence;
+                    Added.Amount *= ResourceWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+                if (const FGuEssenceRegenerationMechanic* Regen = Mechanic.GetPtr<FGuEssenceRegenerationMechanic>())
+                {
+                    FGuEssenceRegenerationMechanic Added = *Regen;
+                    Added.FlatPerSecond *= ResourceWeight;
+                    Added.PercentOfMaximumPerSecond *= ResourceWeight;
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    if (Added.Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (CleanseWeight > 0.0f)
+            {
+                if (const FGuCleanseMechanic* Cleanse = Mechanic.GetPtr<FGuCleanseMechanic>())
+                {
+                    KillerMoveRuntimeAddMechanic(Composite, *Cleanse);
+                    if (Cleanse->Recipient == EGuMechanicRecipient::Self) ++ActivationMechanics; else ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (FieldWeight > 0.0f)
+            {
+                if (const FGuFieldMechanic* Field = Mechanic.GetPtr<FGuFieldMechanic>())
+                {
+                    FGuFieldMechanic Added = *Field;
+                    Added.Radius *= FMath::Max(0.25f, FieldWeight) * RadiusMultiplier;
+                    Added.ForwardOffset *= RangeMultiplier;
+                    Added.Duration *= FMath::Lerp(0.80f, 1.10f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ActivationMechanics;
+                    continue;
+                }
+            }
+            if (ChainWeight > 0.0f)
+            {
+                if (const FGuChainMechanic* Chain = Mechanic.GetPtr<FGuChainMechanic>())
+                {
+                    FGuChainMechanic Added = *Chain;
+                    Added.JumpRadius *= FMath::Max(0.25f, ChainWeight) * RangeMultiplier;
+                    Added.MaxAdditionalTargets = FMath::Max(1, FMath::RoundToInt(static_cast<float>(Added.MaxAdditionalTargets) * FMath::Max(0.5f, ChainWeight)));
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    continue;
+                }
+            }
+            if (MarkWeight > 0.0f)
+            {
+                if (const FGuMarkMechanic* Mark = Mechanic.GetPtr<FGuMarkMechanic>())
+                {
+                    FGuMarkMechanic Added = *Mark;
+                    Added.Strength *= MarkWeight * FMath::Lerp(0.80f, 1.0f, Quality);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ImpactMechanics;
+                    continue;
+                }
+            }
+            if (AttentionWeight > 0.0f)
+            {
+                if (const FGuAttentionBoostMechanic* Attention = Mechanic.GetPtr<FGuAttentionBoostMechanic>())
+                {
+                    FGuAttentionBoostMechanic Added = *Attention;
+                    Added.SlotsGranted = FMath::Max(1, FMath::RoundToInt(static_cast<float>(Added.SlotsGranted) * FMath::Max(0.5f, AttentionWeight)));
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ActivationMechanics;
+                    continue;
+                }
+            }
+            if (SummonWeight > 0.0f)
+            {
+                if (const FGuSummonMechanic* Summon = Mechanic.GetPtr<FGuSummonMechanic>())
+                {
+                    FGuSummonMechanic Added = *Summon;
+                    Added.Count = FMath::Max(1, FMath::RoundToInt(static_cast<float>(Added.Count) * FMath::Max(0.5f, SummonWeight)));
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ActivationMechanics;
+                    continue;
+                }
+            }
+            if (RestrictionWeight > 0.0f)
+            {
+                if (const FGuRestrictionMechanic* Restriction = Mechanic.GetPtr<FGuRestrictionMechanic>())
+                {
+                    FGuRestrictionMechanic Added = *Restriction;
+                    Added.MovementMultiplier = FMath::Lerp(1.0f, Added.MovementMultiplier, RestrictionWeight);
+                    KillerMoveRuntimeAddMechanic(Composite, Added);
+                    ++ImpactMechanics;
+                    continue;
                 }
             }
         }
@@ -1357,6 +2094,7 @@ bool UKillerMoveSubsystem::ResolveCompletedEffect(
 
     FString ManifestationLabel;
     int32 AffectedTargets = 0;
+    const bool bFieldCarrier = KillerMoveRuntimeHasFieldCarrier(Composite);
 
     if (CarrierSource)
     {
@@ -1388,10 +2126,13 @@ bool UKillerMoveSubsystem::ResolveCompletedEffect(
             Composite,
             SourceASC);
 
-        ManifestationLabel = FString::Printf(
-            TEXT("projectile (speed %.0f, range %.0f)"),
-            Projectile.Speed,
-            Projectile.MaxRange);
+        ManifestationLabel = bFieldCarrier
+            ? FString::Printf(TEXT("projectile + persistent field (speed %.0f, range %.0f)"), Projectile.Speed, Projectile.MaxRange)
+            : FString::Printf(TEXT("projectile (speed %.0f, range %.0f)"), Projectile.Speed, Projectile.MaxRange);
+    }
+    else if (bFieldCarrier && bActivationExecuted)
+    {
+        ManifestationLabel = TEXT("persistent field");
     }
     else if (ImpactMechanics > 0)
     {

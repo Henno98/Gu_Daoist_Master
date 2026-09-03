@@ -7,6 +7,7 @@
 #include "GuExecutionLibrary.h"
 #include "GuEntitySubsystem.h"
 #include "GuInstanceObject.h"
+#include "GuRuntimeEffectComponent.h"
 #include "Gu_Projectile.h"
 #include "UGuDefinition.h"
 
@@ -55,6 +56,16 @@ void UGA_GuAbility::ActivateAbility(
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
+    }
+
+    if (AActor* Avatar = ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr)
+    {
+        if (const UGuRuntimeEffectComponent* Runtime = Avatar->FindComponentByClass<UGuRuntimeEffectComponent>(); Runtime && Runtime->IsGuSuppressed())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cannot activate %s: Gu activation is suppressed."), *GuDefinition->Name.ToString());
+            EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+            return;
+        }
     }
 
     UGuInstanceObject* PhysicalGu = GetGuInstanceObject(Handle, ActorInfo);
@@ -155,6 +166,14 @@ bool UGA_GuAbility::CheckCost(
     FGameplayTagContainer* OptionalRelevantTags) const
 {
     if (!Super::CheckCost(Handle, ActorInfo, OptionalRelevantTags)) return false;
+
+    if (AActor* Avatar = ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr)
+    {
+        if (const UGuRuntimeEffectComponent* Runtime = Avatar->FindComponentByClass<UGuRuntimeEffectComponent>(); Runtime && Runtime->IsGuSuppressed())
+        {
+            return false;
+        }
+    }
 
     if (const UGuInstanceObject* PhysicalGu = GetGuInstanceObject(Handle, ActorInfo))
     {
