@@ -17,6 +17,7 @@
 #include "GuEntitySubsystem.h"
 #include "GuPlayerState.h"
 #include "Gu_Daoist_MasterPlayerController.h"
+#include "Gu_Daoist_MasterCharacter.h"
 
 namespace
 {
@@ -107,7 +108,11 @@ void UGuSemanticsHUDWidget::BuildNativeLayout()
     {
         CountPosition->SetPadding(FMargin(10.0f, 5.0f, 0.0f, 0.0f));
     }
-    AddSemanticsVertical(Content, SelectionRow, FMargin(0.0f, 0.0f, 0.0f, 7.0f));
+    AddSemanticsVertical(Content, SelectionRow, FMargin(0.0f, 0.0f, 0.0f, 3.0f));
+
+    ActiveText = MakeHUDText(WidgetTree, TEXT("Active Gu: none"), true);
+    ActiveText->SetColorAndOpacity(FSlateColor(FLinearColor(0.62f, 0.86f, 0.70f, 1.0f)));
+    AddSemanticsVertical(Content, ActiveText, FMargin(0.0f, 0.0f, 0.0f, 7.0f));
 
     NameText = MakeHUDText(WidgetTree, TEXT("No Gu in aperture"), true);
     NameText->SetColorAndOpacity(FSlateColor(FLinearColor(0.76f, 0.85f, 1.0f, 1.0f)));
@@ -141,6 +146,15 @@ void UGuSemanticsHUDWidget::BuildNativeLayout()
 FString UGuSemanticsHUDWidget::GuDisplayName(const FGuid EntityId)
 {
     const AGu_Daoist_MasterPlayerController* PC = GetOwningPlayer<AGu_Daoist_MasterPlayerController>();
+    const AGuPlayerState* PS = PC ? PC->GetPlayerState<AGuPlayerState>() : nullptr;
+    if (PS)
+    {
+        if (const FGuPublicInventoryEntry* PublicEntry = PS->FindPublicGu(EntityId))
+        {
+            return PublicEntry->Name;
+        }
+    }
+
     UGameInstance* GI = PC && PC->GetWorld() ? PC->GetWorld()->GetGameInstance() : nullptr;
     const UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
     const UGuDefinitionRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
@@ -154,11 +168,28 @@ TArray<FGuid> UGuSemanticsHUDWidget::GetOwnedGuIds()
     TArray<FGuid> Result;
     const AGu_Daoist_MasterPlayerController* PC = GetOwningPlayer<AGu_Daoist_MasterPlayerController>();
     const AGuPlayerState* PS = PC ? PC->GetPlayerState<AGuPlayerState>() : nullptr;
-    UGameInstance* GI = PC && PC->GetWorld() ? PC->GetWorld()->GetGameInstance() : nullptr;
-    const UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
-    if (!PS || !Entities) return Result;
+    if (!PS) return Result;
 
-    Result = Entities->QueryGuEntitiesForOwner(PS->DomainCharacterId, EGuContainer::Aperture, false);
+    // Remote listen clients do not own the authoritative server GameInstance ECS.
+    // Use the owner-only replicated projection whenever it is available.
+    if (!PS->OwnedGuInventory.IsEmpty())
+    {
+        Result.Reserve(PS->OwnedGuInventory.Num());
+        for (const FGuPublicInventoryEntry& Entry : PS->OwnedGuInventory)
+        {
+            if (Entry.EntityId.IsValid()) Result.Add(Entry.EntityId);
+        }
+    }
+    else
+    {
+        UGameInstance* GI = PC && PC->GetWorld() ? PC->GetWorld()->GetGameInstance() : nullptr;
+        const UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+        if (Entities && !PS->DomainCharacterId.IsEmpty())
+        {
+            Result = Entities->QueryGuEntitiesForOwner(PS->DomainCharacterId, EGuContainer::Aperture, false);
+        }
+    }
+
     Result.Sort([this](const FGuid& A, const FGuid& B)
     {
         const FString NameA = GuDisplayName(A);
@@ -176,7 +207,14 @@ void UGuSemanticsHUDWidget::EnsureValidSelection(const TArray<FGuid>& OwnedGuIds
         SelectedGuId.Invalidate();
         return;
     }
-    if (!SelectedGuId.IsValid() || !OwnedGuIds.Contains(SelectedGuId)) SelectedGuId = OwnedGuIds[0];
+    if (!SelectedGuId.IsValid() || !OwnedGuIds.Contains(SelectedGuId))
+    {
+        const AGu_Daoist_MasterPlayerController* PC = GetOwningPlayer<AGu_Daoist_MasterPlayerController>();
+        const AGuPlayerState* PS = PC ? PC->GetPlayerState<AGuPlayerState>() : nullptr;
+        SelectedGuId = PS && PS->ActiveGuEntityId.IsValid() && OwnedGuIds.Contains(PS->ActiveGuEntityId)
+            ? PS->ActiveGuEntityId
+            : OwnedGuIds[0];
+    }
 }
 
 FString UGuSemanticsHUDWidget::FormatSemanticMap(const FString& Heading, const TMap<FName, float>& Values)
@@ -200,10 +238,12 @@ FString UGuSemanticsHUDWidget::FormatSemanticMap(const FString& Heading, const T
 void UGuSemanticsHUDWidget::RefreshState()
 {
     const AGu_Daoist_MasterPlayerController* PC = GetOwningPlayer<AGu_Daoist_MasterPlayerController>();
-    UGameInstance* GI = PC && PC->GetWorld() ? PC->GetWorld()->GetGameInstance() : nullptr;
+    const AGuPlayerState* PS = PC ? PC->GetPlayerState<AGuPlayerState>() : nullptr;
+    if (!PC || !PS) return;
+
+    UGameInstance* GI = PC->GetWorld() ? PC->GetWorld()->GetGameInstance() : nullptr;
     const UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
     const UGuDefinitionRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
-    if (!PC || !Entities || !Registry) return;
 
     const TArray<FGuid> OwnedGuIds = GetOwnedGuIds();
     EnsureValidSelection(OwnedGuIds);
@@ -217,6 +257,13 @@ void UGuSemanticsHUDWidget::RefreshState()
     if (PreviousButton) PreviousButton->SetIsEnabled(OwnedGuIds.Num() > 1);
     if (NextButton) NextButton->SetIsEnabled(OwnedGuIds.Num() > 1);
 
+    if (ActiveText)
+    {
+        ActiveText->SetText(FText::FromString(PS->ActiveGuEntityId.IsValid()
+            ? FString::Printf(TEXT("Active Gu: %s"), *GuDisplayName(PS->ActiveGuEntityId))
+            : TEXT("Active Gu: none")));
+    }
+
     if (!SelectedGuId.IsValid())
     {
         if (NameText) NameText->SetText(FText::FromString(TEXT("No Gu in aperture")));
@@ -227,41 +274,81 @@ void UGuSemanticsHUDWidget::RefreshState()
         return;
     }
 
-    const FGuInstanceComponent* Instance = Entities->GetGuInstance(SelectedGuId);
-    const FGuDefinitionRecord* Definition = Instance ? Registry->FindDefinition(Instance->DefinitionId) : nullptr;
-    if (!Instance || !Definition) return;
+    const FGuPublicInventoryEntry* PublicEntry = PS->FindPublicGu(SelectedGuId);
+    const FGuInstanceComponent* Instance = Entities ? Entities->GetGuInstance(SelectedGuId) : nullptr;
+    const FGuDefinitionRecord* Definition = Instance && Registry ? Registry->FindDefinition(Instance->DefinitionId) : nullptr;
+
+    // Server/listen host can render directly from ECS. Remote owning clients use the replicated projection.
+    if (!Instance || !Definition)
+    {
+        if (!PublicEntry) return;
+
+        const bool bIsActive = PS->ActiveGuEntityId == SelectedGuId;
+        if (NameText)
+        {
+            NameText->SetText(FText::FromString(FString::Printf(
+                TEXT("%s%s | Rank %d | %s"),
+                bIsActive ? TEXT("[ACTIVE] ") : TEXT(""),
+                *PublicEntry->Name,
+                PublicEntry->Rank,
+                *PublicEntry->Path.ToString())));
+        }
+        if (InstanceText)
+        {
+            const FString ChargeSuffix = PublicEntry->RemainingCharges >= 0
+                ? FString::Printf(TEXT(" | Charges %d"), PublicEntry->RemainingCharges)
+                : FString();
+            InstanceText->SetText(FText::FromString(FString::Printf(
+                TEXT("Alive %s | Durability %.0f | Quality %.2f | Activations %d%s\nDefinition %s | Entity %s"),
+                PublicEntry->bAlive ? TEXT("yes") : TEXT("no"),
+                PublicEntry->Durability,
+                PublicEntry->Quality,
+                PublicEntry->ActivationCount,
+                *ChargeSuffix,
+                *PublicEntry->DefinitionId.ToString(),
+                *SelectedGuId.ToString(EGuidFormats::DigitsWithHyphens))));
+        }
+        if (NourishmentText)
+        {
+            NourishmentText->SetText(FText::FromString(FString::Printf(
+                TEXT("Nourishment %.0f / 100 | Food: %s | Feed interval %.1fh"),
+                PublicEntry->Hunger,
+                *PublicEntry->FoodKey.ToString(),
+                PublicEntry->FeedingIntervalHours)));
+        }
+        if (NourishmentBar) NourishmentBar->SetPercent(FMath::Clamp(PublicEntry->Hunger / 100.0f, 0.0f, 1.0f));
+        if (SemanticsText) SemanticsText->SetText(FText::FromString(PublicEntry->SemanticsSummary));
+        return;
+    }
 
     const FGuConditionComponent* Condition = Entities->GetGuCondition(SelectedGuId);
     const FGuVisualStateComponent* Visual = Entities->GetGuVisualState(SelectedGuId);
     const FGuNourishmentComponent* Nourishment = Entities->GetGuNourishment(SelectedGuId);
     const FGuChargesComponent* Charges = Entities->GetGuCharges(SelectedGuId);
+    const bool bIsActive = PS->ActiveGuEntityId == SelectedGuId;
 
     if (NameText)
     {
         NameText->SetText(FText::FromString(FString::Printf(
-            TEXT("%s  |  Rank %d  |  %s Path"),
+            TEXT("%s%s | Rank %d | %s"),
+            bIsActive ? TEXT("[ACTIVE] ") : TEXT(""),
             *Definition->Name,
             Definition->Rank,
             *Definition->Path.ToString())));
     }
-
     if (InstanceText)
     {
-        const FString ConditionName = Visual ? Visual->Condition.ToString() : (Condition && Condition->bAlive ? TEXT("alive") : TEXT("dead"));
-        const FString ChargeText = Definition->Lifecycle.bConsumable
-            ? FString::Printf(TEXT(" | Charges %d/%d"), Charges ? Charges->Remaining : 0, Definition->Lifecycle.Charges)
-            : TEXT("");
+        const FString ChargeSuffix = Charges ? FString::Printf(TEXT(" | Charges %d"), Charges->Remaining) : FString();
         InstanceText->SetText(FText::FromString(FString::Printf(
             TEXT("Condition %s | Durability %.0f | Quality %.2f | Activations %d%s\nDefinition %s | Entity %s"),
-            *ConditionName,
+            Visual ? *Visual->Condition.ToString() : TEXT("unknown"),
             Condition ? Condition->Durability : 0.0f,
             Condition ? Condition->Quality : 0.0f,
             Condition ? Condition->ActivationCount : 0,
-            *ChargeText,
-            *Definition->Id.ToString(),
+            *ChargeSuffix,
+            *Instance->DefinitionId.ToString(),
             *SelectedGuId.ToString(EGuidFormats::DigitsWithHyphens))));
     }
-
     if (NourishmentText)
     {
         NourishmentText->SetText(FText::FromString(Nourishment
@@ -294,6 +381,17 @@ void UGuSemanticsHUDWidget::RefreshState()
     if (SemanticsText) SemanticsText->SetText(FText::FromString(Body));
 }
 
+void UGuSemanticsHUDWidget::CommitSelectionAsActive()
+{
+    if (!SelectedGuId.IsValid()) return;
+    AGu_Daoist_MasterPlayerController* PC = GetOwningPlayer<AGu_Daoist_MasterPlayerController>();
+    AGu_Daoist_MasterCharacter* PlayerCharacter = PC ? Cast<AGu_Daoist_MasterCharacter>(PC->GetPawn()) : nullptr;
+    if (PlayerCharacter)
+    {
+        PlayerCharacter->RequestSetActiveGuEntity(SelectedGuId);
+    }
+}
+
 void UGuSemanticsHUDWidget::OnPreviousClicked()
 {
     const TArray<FGuid> OwnedGuIds = GetOwnedGuIds();
@@ -301,6 +399,7 @@ void UGuSemanticsHUDWidget::OnPreviousClicked()
     if (OwnedGuIds.Num() <= 1) return;
     const int32 Current = OwnedGuIds.IndexOfByKey(SelectedGuId);
     SelectedGuId = OwnedGuIds[(Current <= 0 ? OwnedGuIds.Num() : Current) - 1];
+    CommitSelectionAsActive();
     RefreshState();
 }
 
@@ -311,5 +410,6 @@ void UGuSemanticsHUDWidget::OnNextClicked()
     if (OwnedGuIds.Num() <= 1) return;
     const int32 Current = OwnedGuIds.IndexOfByKey(SelectedGuId);
     SelectedGuId = OwnedGuIds[(Current + 1) % OwnedGuIds.Num()];
+    CommitSelectionAsActive();
     RefreshState();
 }

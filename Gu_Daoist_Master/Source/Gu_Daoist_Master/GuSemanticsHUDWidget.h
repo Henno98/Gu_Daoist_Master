@@ -21,6 +21,7 @@ protected:
 
 private:
     UPROPERTY(Transient) TObjectPtr<UTextBlock> GuCountText;
+    UPROPERTY(Transient) TObjectPtr<UTextBlock> ActiveText;
     UPROPERTY(Transient) TObjectPtr<UTextBlock> NameText;
     UPROPERTY(Transient) TObjectPtr<UTextBlock> InstanceText;
     UPROPERTY(Transient) TObjectPtr<UTextBlock> NourishmentText;
@@ -36,6 +37,7 @@ private:
     TArray<FGuid> GetOwnedGuIds();
     void EnsureValidSelection(const TArray<FGuid>& OwnedGuIds);
     FString GuDisplayName(FGuid EntityId);
+    void CommitSelectionAsActive();
 
     static FString FormatSemanticMap(const FString& Heading, const TMap<FName, float>& Values);
 

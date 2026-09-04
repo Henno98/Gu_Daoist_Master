@@ -240,21 +240,17 @@ void UGuRuntimeEffectComponent::RefreshSuppressionTag()
 void UGuRuntimeEffectComponent::ApplyMark(const FName MarkId, const float Strength, const float DurationSeconds)
 {
     if (MarkId.IsNone()) return;
-    const double ExpiresAt = DurationSeconds > 0.0f ? GetCurrentTime() + DurationSeconds : TNumericLimits<double>::Max();
 
-    if (FMarkLayer* Existing = MarkLayers.FindByPredicate([MarkId](const FMarkLayer& Layer){ return Layer.MarkId == MarkId; }))
-    {
-        Existing->Strength = FMath::Max(Existing->Strength, Strength);
-        Existing->ExpiresAt = FMath::Max(Existing->ExpiresAt, ExpiresAt);
-    }
-    else
-    {
-        FMarkLayer Layer;
-        Layer.MarkId = MarkId;
-        Layer.Strength = FMath::Max(0.0f, Strength);
-        Layer.ExpiresAt = ExpiresAt;
-        MarkLayers.Add(MoveTemp(Layer));
-    }
+    // Keep applications as independent layers. Merging by Max(Strength) and
+    // Max(Duration) can accidentally create a mark that never actually existed,
+    // e.g. a strong short mark becoming strong for the lifetime of a weak long mark.
+    FMarkLayer Layer;
+    Layer.MarkId = MarkId;
+    Layer.Strength = FMath::Max(0.0f, Strength);
+    Layer.ExpiresAt = DurationSeconds > 0.0f
+        ? GetCurrentTime() + DurationSeconds
+        : TNumericLimits<double>::Max();
+    MarkLayers.Add(MoveTemp(Layer));
 
     if (AActor* OwnerActor = GetOwner())
     {

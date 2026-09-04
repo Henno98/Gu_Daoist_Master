@@ -21,6 +21,43 @@
 #include "InputActionValue.h"
 #include "UGuDefinition.h"
 
+namespace
+{
+    FString FormatGuInventorySemanticMap(const FString& Heading, const TMap<FName, float>& Values)
+    {
+        FString Out = Heading + TEXT("\n");
+        if (Values.IsEmpty()) return Out + TEXT("  none\n");
+
+        TArray<FName> Keys;
+        Values.GenerateKeyArray(Keys);
+        Keys.Sort([](const FName& A, const FName& B) { return A.ToString() < B.ToString(); });
+        for (const FName Key : Keys)
+        {
+            Out += FString::Printf(TEXT("  %-22s %.3f\n"), *Key.ToString(), Values.FindRef(Key));
+        }
+        return Out;
+    }
+
+    FString BuildGuInventorySemanticsSummary(const FRefinementSemanticProfile& Semantic, const FDaoContaminationComponent* Contamination)
+    {
+        FString Body = FString::Printf(
+            TEXT("Dao mass: %.3f%s\n\n"),
+            Semantic.DaoMass,
+            Semantic.bDerivedPropertySnapshot ? TEXT("  [derived property snapshot]") : TEXT(""));
+        Body += FormatGuInventorySemanticMap(TEXT("PATHS"), Semantic.Paths) + TEXT("\n");
+        Body += FormatGuInventorySemanticMap(TEXT("PROPERTIES"), Semantic.Properties) + TEXT("\n");
+        Body += FormatGuInventorySemanticMap(TEXT("ATTRIBUTES"), Semantic.Attributes) + TEXT("\n");
+        Body += FormatGuInventorySemanticMap(TEXT("TRAITS"), Semantic.Traits) + TEXT("\n");
+        Body += FormatGuInventorySemanticMap(TEXT("TEMPLATES"), Semantic.Templates);
+
+        if (Contamination)
+        {
+            Body += FString::Printf(TEXT("\nCONTAMINATION TOTAL\n  %.3f\n"), Contamination->Total);
+        }
+        return Body;
+    }
+}
+
 void AGu_Daoist_MasterCharacter::BeginPlay()
 {
     Super::BeginPlay();
@@ -85,6 +122,8 @@ AGu_Daoist_MasterCharacter::AGu_Daoist_MasterCharacter()
     GetCharacterMovement()->AirControl = 0.5f;
 
     AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+    AbilitySystemComponent->SetIsReplicated(true);
+    AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
     AttributeSet = CreateDefaultSubobject<UAS_GuMasterAttributeSet>(TEXT("AttributeSet"));
 }
 
@@ -95,14 +134,7 @@ UAbilitySystemComponent* AGu_Daoist_MasterCharacter::GetAbilitySystemComponent()
 
 void AGu_Daoist_MasterCharacter::ActivateTestGu(const FInputActionValue& Value)
 {
-    if (!AbilitySystemComponent || !TestGuAbilityHandle.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Test Gu ability handle is invalid"));
-        return;
-    }
-
-    const bool bActivated = AbilitySystemComponent->TryActivateAbility(TestGuAbilityHandle);
-    UE_LOG(LogTemp, Warning, TEXT("TryActivateAbility returned: %s"), bActivated ? TEXT("true") : TEXT("false"));
+    RequestActivateActiveGu();
 }
 
 bool AGu_Daoist_MasterCharacter::GrantGuAbilityForEntity(
@@ -163,6 +195,8 @@ bool AGu_Daoist_MasterCharacter::GrantGuAbilityForEntity(
         TEXT("Granted runtime Gu ability: %s -> entity %s"),
         *Definition->Name.ToString(),
         *EntityId.ToString());
+
+    RefreshOwnedGuPublicState();
     return true;
 }
 
@@ -170,14 +204,144 @@ bool AGu_Daoist_MasterCharacter::ActivateGuEntity(const FGuid EntityId)
 {
     if (!HasAuthority() || !AbilitySystemComponent || !EntityId.IsValid()) return false;
 
+    AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+    if (!DomainPlayerState || !Entities || DomainPlayerState->DomainCharacterId.IsEmpty()) return false;
+
+    const FOwnedByComponent* OwnerComponent = Entities->GetOwnedBy(EntityId);
+    const FGuPlacementComponent* Placement = Entities->GetGuPlacement(EntityId);
+    if (!OwnerComponent || OwnerComponent->OwnerId != DomainPlayerState->DomainCharacterId ||
+        !Placement || Placement->Container != EGuContainer::Aperture)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Rejected Gu activation for non-owned/non-aperture entity %s."), *EntityId.ToString());
+        return false;
+    }
+
+    FString UseError;
+    if (!Entities->CanUseGu(EntityId, UseError))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Gu %s cannot be activated: %s"), *EntityId.ToString(), *UseError);
+        return false;
+    }
+
     const FGameplayAbilitySpecHandle* Handle = RuntimeGuAbilityHandles.Find(EntityId);
+    if ((!Handle || !Handle->IsValid()) && EntityId == TestGuEntityId && TestGuAbilityHandle.IsValid())
+    {
+        Handle = &TestGuAbilityHandle;
+    }
     if (!Handle || !Handle->IsValid())
     {
         UE_LOG(LogTemp, Warning, TEXT("No runtime Gu ability is bound to entity %s."), *EntityId.ToString());
         return false;
     }
 
-    return AbilitySystemComponent->TryActivateAbility(*Handle);
+    const bool bActivated = AbilitySystemComponent->TryActivateAbility(*Handle);
+    RefreshOwnedGuPublicState();
+    return bActivated;
+}
+
+void AGu_Daoist_MasterCharacter::RequestSetActiveGuEntity(const FGuid EntityId)
+{
+    if (HasAuthority())
+    {
+        FString Error;
+        if (!SetActiveGuEntityAuthoritative(EntityId, Error) && !Error.IsEmpty())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Could not select active Gu: %s"), *Error);
+        }
+        return;
+    }
+
+    ServerSetActiveGuEntity(EntityId);
+}
+
+void AGu_Daoist_MasterCharacter::RequestActivateActiveGu()
+{
+    if (HasAuthority())
+    {
+        FString Error;
+        if (!ActivateActiveGuAuthoritative(Error) && !Error.IsEmpty())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Could not activate active Gu: %s"), *Error);
+        }
+        return;
+    }
+
+    ServerActivateActiveGu();
+}
+
+FGuid AGu_Daoist_MasterCharacter::GetActiveGuEntityId() const
+{
+    const AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    return DomainPlayerState ? DomainPlayerState->ActiveGuEntityId : FGuid();
+}
+
+void AGu_Daoist_MasterCharacter::ServerSetActiveGuEntity_Implementation(const FGuid EntityId)
+{
+    FString Error;
+    if (!SetActiveGuEntityAuthoritative(EntityId, Error) && !Error.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Server rejected active Gu selection: %s"), *Error);
+    }
+}
+
+void AGu_Daoist_MasterCharacter::ServerActivateActiveGu_Implementation()
+{
+    FString Error;
+    if (!ActivateActiveGuAuthoritative(Error) && !Error.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Server rejected active Gu activation: %s"), *Error);
+    }
+}
+
+bool AGu_Daoist_MasterCharacter::SetActiveGuEntityAuthoritative(const FGuid EntityId, FString& OutError)
+{
+    OutError.Reset();
+    if (!HasAuthority())
+    {
+        OutError = TEXT("Active Gu selection is server-authoritative.");
+        return false;
+    }
+
+    AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+    if (!DomainPlayerState || !Entities || DomainPlayerState->DomainCharacterId.IsEmpty())
+    {
+        OutError = TEXT("The player's Gu domain is not ready.");
+        return false;
+    }
+
+    const FOwnedByComponent* OwnerComponent = Entities->GetOwnedBy(EntityId);
+    const FGuPlacementComponent* Placement = Entities->GetGuPlacement(EntityId);
+    if (!EntityId.IsValid() || !OwnerComponent || OwnerComponent->OwnerId != DomainPlayerState->DomainCharacterId ||
+        !Placement || Placement->Container != EGuContainer::Aperture)
+    {
+        OutError = TEXT("That Gu is not in this player's aperture.");
+        return false;
+    }
+
+    DomainPlayerState->SetActiveGuEntityId(EntityId);
+    return true;
+}
+
+bool AGu_Daoist_MasterCharacter::ActivateActiveGuAuthoritative(FString& OutError)
+{
+    OutError.Reset();
+    AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    if (!DomainPlayerState || !DomainPlayerState->ActiveGuEntityId.IsValid())
+    {
+        OutError = TEXT("No active Gu is selected.");
+        return false;
+    }
+
+    if (!ActivateGuEntity(DomainPlayerState->ActiveGuEntityId))
+    {
+        OutError = TEXT("The active Gu could not be activated.");
+        return false;
+    }
+    return true;
 }
 
 void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
@@ -189,7 +353,7 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
         AbilitySystemComponent->InitAbilityActorInfo(this, this);
     }
 
-    if (!HasAuthority() || !AbilitySystemComponent || !GuAbilityClass || !TestGuDefinition)
+    if (!HasAuthority() || !AbilitySystemComponent || !GuAbilityClass)
     {
         return;
     }
@@ -231,7 +395,7 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
         }
     }
 
-    if (Registry && Entities)
+    if (Registry && Entities && TestGuDefinition)
     {
         FString RegisterError;
         if (Registry->RegisterDefinitionAsset(TestGuDefinition, RegisterError, true))
@@ -313,19 +477,28 @@ void AGu_Daoist_MasterCharacter::PossessedBy(AController* NewController)
         UE_LOG(LogTemp, Log, TEXT("Starting aperture ECS Gu: %d"), StartingGuEntityIds.Num());
     }
 
-    FGameplayAbilitySpec AbilitySpec(GuAbilityClass, 1, INDEX_NONE, AbilitySourceObject);
-    TestGuAbilityHandle = AbilitySystemComponent->GiveAbility(AbilitySpec);
+    if (TestGuDefinition)
+    {
+        FGameplayAbilitySpec AbilitySpec(GuAbilityClass, 1, INDEX_NONE, AbilitySourceObject);
+        TestGuAbilityHandle = AbilitySystemComponent->GiveAbility(AbilitySpec);
+        if (TestGuEntityId.IsValid() && TestGuAbilityHandle.IsValid())
+        {
+            RuntimeGuAbilityHandles.Add(TestGuEntityId, TestGuAbilityHandle);
+        }
+    }
 
     UE_LOG(
         LogTemp,
         Warning,
-        TEXT("Gu setup - Authority: %s, Ability: %s, Definition: %s, Entity: %s"),
+        TEXT("Gu setup - Authority: %s, Ability: %s, TestDefinition: %s, TestEntity: %s, StartingDefinitions: %d"),
         HasAuthority() ? TEXT("true") : TEXT("false"),
         *GetNameSafe(GuAbilityClass),
         *GetNameSafe(TestGuDefinition),
-        TestGuEntityId.IsValid() ? *TestGuEntityId.ToString() : TEXT("legacy/no ECS entity"));
+        TestGuEntityId.IsValid() ? *TestGuEntityId.ToString() : TEXT("none"),
+        StartingGuDefinitions.Num());
 
     BindPersistedGuAbilities();
+    RefreshOwnedGuPublicState();
 }
 
 void AGu_Daoist_MasterCharacter::BindPersistedGuAbilities()
@@ -373,6 +546,99 @@ void AGu_Daoist_MasterCharacter::BindPersistedGuAbilities()
     }
 
     UE_LOG(LogTemp, Log, TEXT("Bound %d persisted/aperture Gu entities to generic GAS abilities."), BoundCount);
+}
+
+void AGu_Daoist_MasterCharacter::RefreshOwnedGuPublicState()
+{
+    if (!HasAuthority()) return;
+
+    AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UGuDefinitionRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
+    UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+    if (!DomainPlayerState || !Registry || !Entities || DomainPlayerState->DomainCharacterId.IsEmpty()) return;
+
+    const TArray<FGuid> OwnedIds = Entities->QueryGuEntitiesForOwner(
+        DomainPlayerState->DomainCharacterId,
+        EGuContainer::Aperture,
+        false);
+
+    TArray<FGuPublicInventoryEntry> Projection;
+    Projection.Reserve(OwnedIds.Num());
+
+    for (const FGuid EntityId : OwnedIds)
+    {
+        const FGuInstanceComponent* Instance = Entities->GetGuInstance(EntityId);
+        if (!Instance) continue;
+
+        const FGuDefinitionRecord* Definition = Registry->FindDefinition(Instance->DefinitionId);
+        if (!Definition) continue;
+
+        FGuPublicInventoryEntry Entry;
+        Entry.EntityId = EntityId;
+        Entry.DefinitionId = Instance->DefinitionId;
+        Entry.Name = Definition->Name;
+        Entry.Rank = Definition->Rank;
+        Entry.Path = Definition->Path;
+
+        if (const FGuConditionComponent* Condition = Entities->GetGuCondition(EntityId))
+        {
+            Entry.bAlive = Condition->bAlive;
+            Entry.Durability = Condition->Durability;
+            Entry.Quality = Condition->Quality;
+            Entry.ActivationCount = Condition->ActivationCount;
+        }
+        if (const FGuNourishmentComponent* Nourishment = Entities->GetGuNourishment(EntityId))
+        {
+            Entry.Hunger = Nourishment->Hunger;
+            Entry.FoodKey = Nourishment->FoodKey;
+            Entry.FeedingIntervalHours = Nourishment->IntervalHours;
+        }
+        if (const FGuChargesComponent* Charges = Entities->GetGuCharges(EntityId))
+        {
+            Entry.RemainingCharges = Charges->Remaining;
+        }
+
+        FRefinementSemanticSnapshot Snapshot;
+        if (Entities->GetRefinementSemanticSnapshot(EntityId, Snapshot) && Snapshot.EntityId.IsValid())
+        {
+            Entry.SemanticsSummary = BuildGuInventorySemanticsSummary(Snapshot.Semantic, &Snapshot.Contamination);
+        }
+        else
+        {
+            Entry.SemanticsSummary = BuildGuInventorySemanticsSummary(Definition->RefinementProfile, nullptr);
+        }
+
+        Projection.Add(MoveTemp(Entry));
+    }
+
+    Projection.Sort([](const FGuPublicInventoryEntry& A, const FGuPublicInventoryEntry& B)
+    {
+        const int32 NameCompare = A.Name.Compare(B.Name, ESearchCase::IgnoreCase);
+        return NameCompare == 0 ? A.EntityId.ToString() < B.EntityId.ToString() : NameCompare < 0;
+    });
+
+    DomainPlayerState->SetOwnedGuInventory(Projection);
+
+    const bool bActiveStillOwned = Projection.ContainsByPredicate([DomainPlayerState](const FGuPublicInventoryEntry& Entry)
+    {
+        return Entry.EntityId == DomainPlayerState->ActiveGuEntityId;
+    });
+
+    if (!bActiveStillOwned)
+    {
+        FGuid DefaultActive;
+        if (TestGuEntityId.IsValid() && Projection.ContainsByPredicate([this](const FGuPublicInventoryEntry& Entry)
+            { return Entry.EntityId == TestGuEntityId; }))
+        {
+            DefaultActive = TestGuEntityId;
+        }
+        else if (!Projection.IsEmpty())
+        {
+            DefaultActive = Projection[0].EntityId;
+        }
+        DomainPlayerState->SetActiveGuEntityId(DefaultActive);
+    }
 }
 
 void AGu_Daoist_MasterCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

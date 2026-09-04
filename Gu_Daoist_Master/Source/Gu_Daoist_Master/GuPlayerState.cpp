@@ -22,6 +22,8 @@ void AGuPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AGuPlayerState, CultivationRank);
     DOREPLIFETIME(AGuPlayerState, DomainCharacterId);
+    DOREPLIFETIME_CONDITION(AGuPlayerState, OwnedGuInventory, COND_OwnerOnly);
+    DOREPLIFETIME_CONDITION(AGuPlayerState, ActiveGuEntityId, COND_OwnerOnly);
     DOREPLIFETIME(AGuPlayerState, RefinementPublicState);
     DOREPLIFETIME(AGuPlayerState, KillerMovePublicState);
 }
@@ -37,6 +39,38 @@ void AGuPlayerState::SetDomainCharacterId(const FString& NewCharacterId)
 void AGuPlayerState::OnRep_DomainCharacterId()
 {
     PropagateDomainCharacterId();
+}
+
+void AGuPlayerState::SetOwnedGuInventory(const TArray<FGuPublicInventoryEntry>& NewInventory)
+{
+    if (!HasAuthority()) return;
+    OwnedGuInventory = NewInventory;
+    ForceNetUpdate();
+}
+
+void AGuPlayerState::SetActiveGuEntityId(const FGuid NewActiveGuEntityId)
+{
+    if (!HasAuthority()) return;
+    ActiveGuEntityId = NewActiveGuEntityId;
+    ForceNetUpdate();
+}
+
+const FGuPublicInventoryEntry* AGuPlayerState::FindPublicGu(const FGuid EntityId) const
+{
+    return OwnedGuInventory.FindByPredicate([EntityId](const FGuPublicInventoryEntry& Entry)
+    {
+        return Entry.EntityId == EntityId;
+    });
+}
+
+void AGuPlayerState::OnRep_OwnedGuInventory()
+{
+    // Native Gu HUD reads the replicated projection directly.
+}
+
+void AGuPlayerState::OnRep_ActiveGuEntityId()
+{
+    // Native Gu HUD reads the replicated active selection directly.
 }
 
 void AGuPlayerState::SetRefinementPublicState(const FRefinementPublicState& NewState)

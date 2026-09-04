@@ -200,16 +200,38 @@ void UGA_GuAbility::ApplyCost(
     Super::ApplyCost(Handle, ActorInfo, ActivationInfo);
 
     const FGuEssenceCostMechanic* EssenceCost = GetEssenceCostMechanic(Handle, ActorInfo);
-    if (!EssenceCost || !PrimevalEssenceCostEffect) return;
+    if (!EssenceCost || EssenceCost->Cost <= 0.0f) return;
 
-    FGameplayEffectSpecHandle CostSpec = MakeOutgoingGameplayEffectSpec(
-        PrimevalEssenceCostEffect,
-        GetAbilityLevel(Handle, ActorInfo));
-    if (!CostSpec.IsValid()) return;
+    UAbilitySystemComponent* ASC = ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
+    if (!ASC) return;
 
-    const FGameplayTag EssenceCostTag = FGameplayTag::RequestGameplayTag(FName("Data.Gu.EssenceCost"));
-    CostSpec.Data->SetSetByCallerMagnitude(EssenceCostTag, -EssenceCost->Cost);
-    ApplyGameplayEffectSpecToOwner(Handle, ActorInfo, ActivationInfo, CostSpec);
+    const UGuDefinition* Definition = GetGuDefinition(Handle, ActorInfo);
+    TSubclassOf<UGameplayEffect> CostEffect = Definition && Definition->PrimevalEssenceCostEffect
+        ? Definition->PrimevalEssenceCostEffect
+        : PrimevalEssenceCostEffect;
+
+    if (CostEffect)
+    {
+        FGameplayEffectSpecHandle CostSpec = MakeOutgoingGameplayEffectSpec(
+            CostEffect,
+            GetAbilityLevel(Handle, ActorInfo));
+        if (CostSpec.IsValid() && CostSpec.Data.IsValid())
+        {
+            const FGameplayTag EssenceCostTag = FGameplayTag::RequestGameplayTag(FName("Data.Gu.EssenceCost"));
+            if (EssenceCostTag.IsValid())
+            {
+                CostSpec.Data->SetSetByCallerMagnitude(EssenceCostTag, -EssenceCost->Cost);
+                ApplyGameplayEffectSpecToOwner(Handle, ActorInfo, ActivationInfo, CostSpec);
+                return;
+            }
+        }
+    }
+
+    // Procedural Gu do not necessarily have an authored GameplayEffect asset. The
+    // mechanic is still authoritative gameplay data, so never silently make it free.
+    const FGameplayAttribute EssenceAttribute = UAS_GuMasterAttributeSet::GetPrimevalEssenceAttribute();
+    const float Current = ASC->GetNumericAttribute(EssenceAttribute);
+    ASC->SetNumericAttributeBase(EssenceAttribute, FMath::Max(0.0f, Current - EssenceCost->Cost));
 }
 
 const FGuEssenceCostMechanic* UGA_GuAbility::GetEssenceCostMechanic(

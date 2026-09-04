@@ -3,6 +3,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "CollisionQueryParams.h"
+#include "Components/SceneComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
@@ -13,8 +14,15 @@ AGuEffectField::AGuEffectField()
 {
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = true;
+
+    // AActor location/replication is rooted in RootComponent. Without one, a field
+    // spawned at a projectile impact can report world origin from GetActorLocation()
+    // and cannot participate correctly in network relevancy calculations.
+    USceneComponent* SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("GuFieldRoot"));
+    SetRootComponent(SceneRoot);
+
     bReplicates = true;
-    SetReplicateMovement(false);
+    SetReplicateMovement(true);
 }
 
 void AGuEffectField::InitializeField(
@@ -37,6 +45,11 @@ void AGuEffectField::InitializeField(
 void AGuEffectField::Tick(const float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+
+    // Field gameplay is authoritative. Clients receive the replicated field actor
+    // for presentation/relevancy but never execute its payload locally.
+    if (!HasAuthority()) return;
+
     UWorld* World = GetWorld();
     if (!World || !Definition || !SourceASC.IsValid()) return;
 
@@ -91,7 +104,7 @@ void AGuEffectField::Pulse()
         Hit.TraceStart = Center;
         Hit.TraceEnd = Targets[Index]->GetActorLocation();
         Hit.ImpactPoint = Targets[Index]->GetActorLocation();
-        UGuExecutionLibrary::ExecuteImpact(Definition, SourceAbilitySystem, Targets[Index], Hit);
+        UGuExecutionLibrary::ExecutePayloadImpact(Definition, SourceAbilitySystem, Targets[Index], Hit);
     }
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)

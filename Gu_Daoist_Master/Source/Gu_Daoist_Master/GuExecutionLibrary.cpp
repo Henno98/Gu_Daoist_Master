@@ -42,13 +42,22 @@ namespace
     using FImpactExecutor = bool(*)(const TInstancedStruct<FGuMechanic>&, const FGuImpactContext&);
     using FActivationExecutor = bool(*)(const TInstancedStruct<FGuMechanic>&, const FGuActivationContext&);
 
-    bool GuExecExecuteImpactInternal(
+    bool GuExecExecutePayloadInternal(
         UGuDefinition* GuDefinition,
         UAbilitySystemComponent* SourceASC,
         AActor* TargetActor,
         const FHitResult& HitResult,
         float MagnitudeScale,
         bool bAllowChain);
+
+    bool GuExecResolveDeliveredImpact(
+        UGuDefinition* Definition,
+        UAbilitySystemComponent* SourceASC,
+        AActor* TargetActor,
+        const FHitResult& HitResult,
+        float MagnitudeScale,
+        bool bAllowChain,
+        bool bAllowMeleeCarrier);
 
     FVector GuExecEffectDirection(const AActor* Actor, const FHitResult* Hit)
     {
@@ -213,14 +222,26 @@ namespace
         AActor* SourceActor = Context.SourceASC ? Context.SourceASC->GetAvatarActor() : nullptr;
         if (!Character || !SourceActor) return false;
 
+        // For composed carriers the effect origin is encoded in TraceStart: field
+        // centre, area centre, melee origin, previous chain target, etc. Falling back
+        // to the caster preserves ordinary direct-use behavior.
+        FVector EffectOrigin = SourceActor->GetActorLocation();
+        if (Context.Hit)
+        {
+            EffectOrigin = FVector(
+                static_cast<double>(Context.Hit->TraceStart.X),
+                static_cast<double>(Context.Hit->TraceStart.Y),
+                static_cast<double>(Context.Hit->TraceStart.Z));
+        }
+
         FVector Direction = FVector::ZeroVector;
         switch (Displacement->Mode)
         {
         case EGuDisplacementMode::AwayFromSource:
-            Direction = (Character->GetActorLocation() - SourceActor->GetActorLocation()).GetSafeNormal();
+            Direction = (Character->GetActorLocation() - EffectOrigin).GetSafeNormal();
             break;
         case EGuDisplacementMode::TowardSource:
-            Direction = (SourceActor->GetActorLocation() - Character->GetActorLocation()).GetSafeNormal();
+            Direction = (EffectOrigin - Character->GetActorLocation()).GetSafeNormal();
             break;
         case EGuDisplacementMode::Upward:
             Direction = FVector::UpVector;
@@ -544,34 +565,57 @@ namespace
         return true;
     }
 
-    bool GuExecExecuteSummon(const TInstancedStruct<FGuMechanic>& Mechanic, const FGuActivationContext& Context)
+    bool GuExecSpawnSummonsAtLocation(
+        const FGuSummonMechanic& Summon,
+        const FGuActivationContext& Context,
+        const FVector& Location,
+        const FVector& ForwardDirection,
+        const bool bApplyForwardOffset)
     {
-        const FGuSummonMechanic* Summon = Mechanic.GetPtr<FGuSummonMechanic>();
         UWorld* World = Context.SourceActor ? Context.SourceActor->GetWorld() : nullptr;
-        if (!Summon || !World || !Summon->ActorClass || Summon->Count <= 0) return false;
+        if (!World || !Summon.ActorClass || Summon.Count <= 0) return false;
 
-        const FVector Forward = Context.SourceActor->GetActorForwardVector();
-        const FVector Right = Context.SourceActor->GetActorRightVector();
-        const FVector Center = Context.SourceActor->GetActorLocation() + Forward * Summon->ForwardOffset;
+        const FVector Forward = ForwardDirection.GetSafeNormal().IsNearlyZero()
+            ? Context.SourceActor->GetActorForwardVector().GetSafeNormal()
+            : ForwardDirection.GetSafeNormal();
+        const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward).GetSafeNormal();
+        const FVector SafeRight = Right.IsNearlyZero() ? Context.SourceActor->GetActorRightVector() : Right;
+        const FVector Center = Location + (bApplyForwardOffset ? Forward * Summon.ForwardOffset : FVector::ZeroVector);
         bool bSpawnedAny = false;
-        const int32 Count = FMath::Clamp(Summon->Count, 1, 64);
+        const int32 Count = FMath::Clamp(Summon.Count, 1, 64);
 
         for (int32 Index = 0; Index < Count; ++Index)
         {
             const float Angle = Count > 1 ? (2.0f * PI * static_cast<float>(Index) / static_cast<float>(Count)) : 0.0f;
-            const float Radius = Count > 1 ? Summon->SpawnRadius : 0.0f;
-            const FVector Offset = Forward * (FMath::Cos(Angle) * Radius) + Right * (FMath::Sin(Angle) * Radius);
+            const float Radius = Count > 1 ? Summon.SpawnRadius : 0.0f;
+            const FVector Offset = Forward * (FMath::Cos(Angle) * Radius) + SafeRight * (FMath::Sin(Angle) * Radius);
 
             FActorSpawnParameters Params;
             Params.Owner = Context.SourceActor;
             Params.Instigator = Cast<APawn>(Context.SourceActor);
             Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-            AActor* Spawned = World->SpawnActor<AActor>(Summon->ActorClass, Center + Offset, Context.SourceActor->GetActorRotation(), Params);
+            AActor* Spawned = World->SpawnActor<AActor>(
+                Summon.ActorClass,
+                Center + Offset,
+                Forward.Rotation(),
+                Params);
             if (!Spawned) continue;
-            if (Summon->Lifetime > 0.0f) Spawned->SetLifeSpan(Summon->Lifetime);
+            if (Summon.Lifetime > 0.0f) Spawned->SetLifeSpan(Summon.Lifetime);
             bSpawnedAny = true;
         }
         return bSpawnedAny;
+    }
+
+    bool GuExecExecuteSummon(const TInstancedStruct<FGuMechanic>& Mechanic, const FGuActivationContext& Context)
+    {
+        const FGuSummonMechanic* Summon = Mechanic.GetPtr<FGuSummonMechanic>();
+        if (!Summon || !Context.SourceActor) return false;
+        return GuExecSpawnSummonsAtLocation(
+            *Summon,
+            Context,
+            Context.SourceActor->GetActorLocation(),
+            Context.SourceActor->GetActorForwardVector(),
+            true);
     }
 
     TArray<AActor*> GuExecFindTargetsInArea(AActor* SourceActor, const FVector& Center, const float Radius, const bool bIncludeSelf)
@@ -600,6 +644,39 @@ namespace
         return Targets;
     }
 
+    bool GuExecExecuteAreaAtLocation(
+        const FGuAreaMechanic& Area,
+        const FGuActivationContext& Context,
+        const FVector& Center)
+    {
+        if (!Context.SourceActor) return false;
+
+        TArray<AActor*> Targets = GuExecFindTargetsInArea(Context.SourceActor, Center, Area.Radius, Area.bIncludeSelf);
+        Targets.Sort([Center](const AActor& A, const AActor& B)
+        {
+            return FVector::DistSquared(A.GetActorLocation(), Center) < FVector::DistSquared(B.GetActorLocation(), Center);
+        });
+
+        const int32 Limit = Area.MaxTargets > 0 ? FMath::Min(Area.MaxTargets, Targets.Num()) : Targets.Num();
+        bool bExecutedAnything = false;
+        for (int32 Index = 0; Index < Limit; ++Index)
+        {
+            FHitResult Hit;
+            Hit.TraceStart = Center;
+            Hit.TraceEnd = Targets[Index]->GetActorLocation();
+            Hit.ImpactPoint = Targets[Index]->GetActorLocation();
+            bExecutedAnything |= GuExecExecutePayloadInternal(
+                Context.Definition,
+                Context.SourceASC,
+                Targets[Index],
+                Hit,
+                1.0f,
+                true);
+        }
+        // A carrier manifested even when there happened to be no valid targets.
+        return bExecutedAnything || Limit == 0;
+    }
+
     bool GuExecExecuteArea(const TInstancedStruct<FGuMechanic>& Mechanic, const FGuActivationContext& Context)
     {
         const FGuAreaMechanic* Area = Mechanic.GetPtr<FGuAreaMechanic>();
@@ -607,58 +684,67 @@ namespace
 
         const FVector Center = Context.SourceActor->GetActorLocation()
             + Context.SourceActor->GetActorForwardVector() * Area->ForwardOffset;
-        TArray<AActor*> Targets = GuExecFindTargetsInArea(Context.SourceActor, Center, Area->Radius, Area->bIncludeSelf);
-        Targets.Sort([Center](const AActor& A, const AActor& B)
-        {
-            return FVector::DistSquared(A.GetActorLocation(), Center) < FVector::DistSquared(B.GetActorLocation(), Center);
-        });
+        return GuExecExecuteAreaAtLocation(*Area, Context, Center);
+    }
 
-        const int32 Limit = Area->MaxTargets > 0 ? FMath::Min(Area->MaxTargets, Targets.Num()) : Targets.Num();
-        for (int32 Index = 0; Index < Limit; ++Index)
-        {
-            FHitResult Hit;
-            Hit.TraceStart = Context.SourceActor->GetActorLocation();
-            Hit.TraceEnd = Targets[Index]->GetActorLocation();
-            GuExecExecuteImpactInternal(Context.Definition, Context.SourceASC, Targets[Index], Hit, 1.0f, true);
-        }
+    bool GuExecSpawnFieldAtLocation(
+        const FGuFieldMechanic& Field,
+        const FGuActivationContext& Context,
+        const FVector& Location)
+    {
+        UWorld* World = Context.SourceActor ? Context.SourceActor->GetWorld() : nullptr;
+        if (!World) return false;
+
+        FActorSpawnParameters Params;
+        Params.Owner = Context.SourceActor;
+        Params.Instigator = Cast<APawn>(Context.SourceActor);
+        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        AGuEffectField* FieldActor = World->SpawnActor<AGuEffectField>(
+            AGuEffectField::StaticClass(),
+            Location,
+            FRotator::ZeroRotator,
+            Params);
+        if (!FieldActor) return false;
+        FieldActor->InitializeField(Field, Context.Definition, Context.SourceASC, Context.SourceActor);
         return true;
     }
 
     bool GuExecExecuteField(const TInstancedStruct<FGuMechanic>& Mechanic, const FGuActivationContext& Context)
     {
         const FGuFieldMechanic* Field = Mechanic.GetPtr<FGuFieldMechanic>();
-        UWorld* World = Context.SourceActor ? Context.SourceActor->GetWorld() : nullptr;
-        if (!Field || !World) return false;
+        if (!Field || !Context.SourceActor) return false;
 
         const FVector Location = Context.SourceActor->GetActorLocation()
             + Context.SourceActor->GetActorForwardVector() * Field->ForwardOffset;
-        FActorSpawnParameters Params;
-        Params.Owner = Context.SourceActor;
-        Params.Instigator = Cast<APawn>(Context.SourceActor);
-        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        AGuEffectField* FieldActor = World->SpawnActor<AGuEffectField>(AGuEffectField::StaticClass(), Location, FRotator::ZeroRotator, Params);
-        if (!FieldActor) return false;
-        FieldActor->InitializeField(*Field, Context.Definition, Context.SourceASC, Context.SourceActor);
-        return true;
+        return GuExecSpawnFieldAtLocation(*Field, Context, Location);
     }
 
-    bool GuExecExecuteMelee(const TInstancedStruct<FGuMechanic>& Mechanic, const FGuActivationContext& Context)
+    bool GuExecExecuteMeleeAtLocation(
+        const FGuMeleeMechanic& Melee,
+        const FGuActivationContext& Context,
+        const FVector& Origin,
+        const FVector& ForwardDirection,
+        const bool bComposeSecondaryCarriers)
     {
-        const FGuMeleeMechanic* Melee = Mechanic.GetPtr<FGuMeleeMechanic>();
-        if (!Melee || !Context.SourceActor) return false;
+        if (!Context.SourceActor) return false;
 
-        TArray<AActor*> Candidates = GuExecFindTargetsInArea(Context.SourceActor, Context.SourceActor->GetActorLocation(), Melee->Range + Melee->Radius, false);
-        const FVector Forward = Context.SourceActor->GetActorForwardVector().GetSafeNormal();
-        const FVector Origin = Context.SourceActor->GetActorLocation();
-        const float MinDot = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Melee->ArcDegrees, 1.0f, 360.0f) * 0.5f));
+        TArray<AActor*> Candidates = GuExecFindTargetsInArea(
+            Context.SourceActor,
+            Origin,
+            Melee.Range + Melee.Radius,
+            false);
+        const FVector Forward = ForwardDirection.GetSafeNormal().IsNearlyZero()
+            ? Context.SourceActor->GetActorForwardVector().GetSafeNormal()
+            : ForwardDirection.GetSafeNormal();
+        const float MinDot = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Melee.ArcDegrees, 1.0f, 360.0f) * 0.5f));
 
         Candidates.RemoveAll([&](const AActor* Actor)
         {
             if (!Actor) return true;
             const FVector Offset = Actor->GetActorLocation() - Origin;
             const float Distance = Offset.Size();
-            if (Distance > Melee->Range + Melee->Radius) return true;
-            if (Melee->ArcDegrees >= 359.9f) return false;
+            if (Distance > Melee.Range + Melee.Radius) return true;
+            if (Melee.ArcDegrees >= 359.9f) return false;
             return FVector::DotProduct(Forward, Offset.GetSafeNormal()) < MinDot;
         });
         Candidates.Sort([Origin](const AActor& A, const AActor& B)
@@ -666,15 +752,77 @@ namespace
             return FVector::DistSquared(A.GetActorLocation(), Origin) < FVector::DistSquared(B.GetActorLocation(), Origin);
         });
 
-        const int32 Limit = Melee->MaxTargets > 0 ? FMath::Min(Melee->MaxTargets, Candidates.Num()) : Candidates.Num();
+        const int32 Limit = Melee.MaxTargets > 0 ? FMath::Min(Melee.MaxTargets, Candidates.Num()) : Candidates.Num();
+        bool bExecutedAnything = false;
         for (int32 Index = 0; Index < Limit; ++Index)
         {
             FHitResult Hit;
             Hit.TraceStart = Origin;
             Hit.TraceEnd = Candidates[Index]->GetActorLocation();
-            GuExecExecuteImpactInternal(Context.Definition, Context.SourceASC, Candidates[Index], Hit, 1.0f, true);
+            Hit.ImpactPoint = Candidates[Index]->GetActorLocation();
+            if (bComposeSecondaryCarriers)
+            {
+                bExecutedAnything |= GuExecResolveDeliveredImpact(
+                    Context.Definition,
+                    Context.SourceASC,
+                    Candidates[Index],
+                    Hit,
+                    1.0f,
+                    true,
+                    false);
+            }
+            else
+            {
+                bExecutedAnything |= GuExecExecutePayloadInternal(
+                    Context.Definition,
+                    Context.SourceASC,
+                    Candidates[Index],
+                    Hit,
+                    1.0f,
+                    true);
+            }
         }
-        return true;
+        return bExecutedAnything || Limit == 0;
+    }
+
+    bool GuExecExecuteMelee(const TInstancedStruct<FGuMechanic>& Mechanic, const FGuActivationContext& Context)
+    {
+        const FGuMeleeMechanic* Melee = Mechanic.GetPtr<FGuMeleeMechanic>();
+        if (!Melee || !Context.SourceActor) return false;
+        return GuExecExecuteMeleeAtLocation(
+            *Melee,
+            Context,
+            Context.SourceActor->GetActorLocation(),
+            Context.SourceActor->GetActorForwardVector(),
+            true);
+    }
+
+    bool GuExecHasProjectileCarrier(const UGuDefinition* Definition)
+    {
+        if (!Definition) return false;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (Mechanic.GetPtr<FGuProjectileMechanic>()) return true;
+        }
+        return false;
+    }
+
+    bool GuExecHasMeleeCarrier(const UGuDefinition* Definition)
+    {
+        if (!Definition) return false;
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (Mechanic.GetPtr<FGuMeleeMechanic>()) return true;
+        }
+        return false;
+    }
+
+    bool GuExecIsDeferredCarrierType(const UScriptStruct* Type)
+    {
+        return Type == FGuMeleeMechanic::StaticStruct()
+            || Type == FGuAreaMechanic::StaticStruct()
+            || Type == FGuFieldMechanic::StaticStruct()
+            || Type == FGuSummonMechanic::StaticStruct();
     }
 
     const TMap<const UScriptStruct*, FImpactExecutor>& GuExecImpactExecutors()
@@ -723,6 +871,122 @@ namespace
             { FGuFieldMechanic::StaticStruct(), &GuExecExecuteField }
         };
         return Executors;
+    }
+
+    bool GuExecResolveDeliveredImpact(
+        UGuDefinition* Definition,
+        UAbilitySystemComponent* SourceASC,
+        AActor* TargetActor,
+        const FHitResult& HitResult,
+        const float MagnitudeScale,
+        const bool bAllowChain,
+        const bool bAllowMeleeCarrier)
+    {
+        if (!Definition || !SourceASC) return false;
+
+        AActor* SourceActor = SourceASC->GetAvatarActor();
+        if (!SourceActor) return false;
+
+        // Transport carriers should resolve secondary carriers at the actual swept
+        // carrier location, not at the target actor's pivot. StaticMeshActor pivots can
+        // legitimately live at world origin even when their geometry is elsewhere.
+        const FVector HitLocation(
+            static_cast<double>(HitResult.Location.X),
+            static_cast<double>(HitResult.Location.Y),
+            static_cast<double>(HitResult.Location.Z));
+        const FVector ImpactLocation(
+            static_cast<double>(HitResult.ImpactPoint.X),
+            static_cast<double>(HitResult.ImpactPoint.Y),
+            static_cast<double>(HitResult.ImpactPoint.Z));
+        const FVector TraceEndLocation(
+            static_cast<double>(HitResult.TraceEnd.X),
+            static_cast<double>(HitResult.TraceEnd.Y),
+            static_cast<double>(HitResult.TraceEnd.Z));
+
+        FVector DeliveryLocation = HitLocation;
+        if (DeliveryLocation.IsNearlyZero() && !ImpactLocation.IsNearlyZero())
+        {
+            DeliveryLocation = ImpactLocation;
+        }
+        if (DeliveryLocation.IsNearlyZero() && !TraceEndLocation.IsNearlyZero())
+        {
+            DeliveryLocation = TraceEndLocation;
+        }
+        if (DeliveryLocation.IsNearlyZero() && TargetActor)
+        {
+            DeliveryLocation = TargetActor->GetActorLocation();
+        }
+
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("Gu carrier delivery - Hit.Location=%s ImpactPoint=%s TraceEnd=%s Resolved=%s TargetOrigin=%s"),
+            *HitLocation.ToString(),
+            *ImpactLocation.ToString(),
+            *TraceEndLocation.ToString(),
+            *DeliveryLocation.ToString(),
+            TargetActor ? *TargetActor->GetActorLocation().ToString() : TEXT("<none>"));
+
+        FVector DeliveryDirection = (HitResult.TraceEnd - HitResult.TraceStart).GetSafeNormal();
+        if (DeliveryDirection.IsNearlyZero()) DeliveryDirection = SourceActor->GetActorForwardVector();
+
+        const FGuActivationContext CarrierContext { Definition, SourceASC, SourceActor, nullptr };
+        bool bExecutedAnything = false;
+        bool bHasPayloadCarrier = false;
+
+        // Transport carriers such as Projectile establish the delivery point. Spatial/temporal
+        // carriers on the same Gu then manifest at that point instead of firing independently
+        // from the caster. This is the core mechanic-composition rule.
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : Definition->Mechanics)
+        {
+            if (const FGuFieldMechanic* Field = Mechanic.GetPtr<FGuFieldMechanic>())
+            {
+                bHasPayloadCarrier = true;
+                bExecutedAnything |= GuExecSpawnFieldAtLocation(*Field, CarrierContext, DeliveryLocation);
+            }
+            else if (const FGuAreaMechanic* Area = Mechanic.GetPtr<FGuAreaMechanic>())
+            {
+                bHasPayloadCarrier = true;
+                bExecutedAnything |= GuExecExecuteAreaAtLocation(*Area, CarrierContext, DeliveryLocation);
+            }
+            else if (const FGuMeleeMechanic* Melee = Mechanic.GetPtr<FGuMeleeMechanic>())
+            {
+                if (bAllowMeleeCarrier)
+                {
+                    bHasPayloadCarrier = true;
+                    bExecutedAnything |= GuExecExecuteMeleeAtLocation(
+                        *Melee,
+                        CarrierContext,
+                        DeliveryLocation,
+                        DeliveryDirection,
+                        false);
+                }
+            }
+            else if (const FGuSummonMechanic* Summon = Mechanic.GetPtr<FGuSummonMechanic>())
+            {
+                bExecutedAnything |= GuExecSpawnSummonsAtLocation(
+                    *Summon,
+                    CarrierContext,
+                    DeliveryLocation,
+                    DeliveryDirection,
+                    false);
+            }
+        }
+
+        // If another carrier took ownership of the payload (field/area/melee), it will deliver
+        // the terminal mechanics itself. Otherwise this is an ordinary direct impact.
+        if (!bHasPayloadCarrier && TargetActor)
+        {
+            bExecutedAnything |= GuExecExecutePayloadInternal(
+                Definition,
+                SourceASC,
+                TargetActor,
+                HitResult,
+                MagnitudeScale,
+                bAllowChain);
+        }
+
+        return bExecutedAnything;
     }
 
     bool GuExecExecuteChain(
@@ -775,13 +1039,13 @@ namespace
             ChainHit.TraceStart = Origin;
             ChainHit.TraceEnd = NextTarget->GetActorLocation();
             ChainHit.ImpactPoint = NextTarget->GetActorLocation();
-            bExecuted |= GuExecExecuteImpactInternal(Definition, SourceASC, NextTarget, ChainHit, Scale, false);
+            bExecuted |= GuExecExecutePayloadInternal(Definition, SourceASC, NextTarget, ChainHit, Scale, false);
             CurrentTarget = NextTarget;
         }
         return bExecuted;
     }
 
-    bool GuExecExecuteImpactInternal(
+    bool GuExecExecutePayloadInternal(
         UGuDefinition* GuDefinition,
         UAbilitySystemComponent* SourceASC,
         AActor* TargetActor,
@@ -817,7 +1081,14 @@ bool UGuExecutionLibrary::ExecuteImpact(
     AActor* TargetActor,
     const FHitResult& HitResult)
 {
-    const bool bExecutedAnything = GuExecExecuteImpactInternal(GuDefinition, SourceASC, TargetActor, HitResult, 1.0f, true);
+    const bool bExecutedAnything = GuExecResolveDeliveredImpact(
+        GuDefinition,
+        SourceASC,
+        TargetActor,
+        HitResult,
+        1.0f,
+        true,
+        true);
     if (bExecutedAnything && SourceASC)
     {
         if (AActor* SourceActor = SourceASC->GetAvatarActor())
@@ -831,6 +1102,23 @@ bool UGuExecutionLibrary::ExecuteImpact(
     return bExecutedAnything;
 }
 
+bool UGuExecutionLibrary::ExecutePayloadImpact(
+    UGuDefinition* GuDefinition,
+    UAbilitySystemComponent* SourceASC,
+    AActor* TargetActor,
+    const FHitResult& HitResult,
+    const float MagnitudeScale,
+    const bool bAllowChain)
+{
+    return GuExecExecutePayloadInternal(
+        GuDefinition,
+        SourceASC,
+        TargetActor,
+        HitResult,
+        FMath::Max(0.0f, MagnitudeScale),
+        bAllowChain);
+}
+
 bool UGuExecutionLibrary::ExecuteActivation(
     UGuDefinition* GuDefinition,
     UAbilitySystemComponent* SourceASC,
@@ -840,12 +1128,48 @@ bool UGuExecutionLibrary::ExecuteActivation(
     if (!GuDefinition || !SourceASC || !SourceActor) return false;
 
     const FGuActivationContext Context { GuDefinition, SourceASC, SourceActor, SystemConfig };
+    const bool bProjectileDelivery = GuExecHasProjectileCarrier(GuDefinition);
+    const bool bMeleeDelivery = !bProjectileDelivery && GuExecHasMeleeCarrier(GuDefinition);
     bool bExecutedAnything = false;
+
+    // First execute true activation/self mechanics. Carrier mechanics are handled as a
+    // composition stage below so they do not all independently originate at the caster.
     for (const TInstancedStruct<FGuMechanic>& Mechanic : GuDefinition->Mechanics)
     {
         const UScriptStruct* Type = Mechanic.GetScriptStruct();
-        const FActivationExecutor* Executor = Type ? GuExecActivationExecutors().Find(Type) : nullptr;
+        if (!Type || GuExecIsDeferredCarrierType(Type)) continue;
+
+        const FActivationExecutor* Executor = GuExecActivationExecutors().Find(Type);
         if (Executor) bExecutedAnything |= (*Executor)(Mechanic, Context);
     }
+
+    // Projectile is the outer transport carrier and is spawned by UGA_GuAbility. Any
+    // spatial/temporal carriers wait for its impact and manifest at that destination.
+    if (bProjectileDelivery) return bExecutedAnything;
+
+    // Melee is the next transport tier. A successful contact becomes the destination for
+    // Field/Area/Summon mechanics, which lets combinations such as Melee + Field compose
+    // without separately creating the field at the caster.
+    if (bMeleeDelivery)
+    {
+        for (const TInstancedStruct<FGuMechanic>& Mechanic : GuDefinition->Mechanics)
+        {
+            if (!Mechanic.GetPtr<FGuMeleeMechanic>()) continue;
+            const FActivationExecutor* Executor = GuExecActivationExecutors().Find(FGuMeleeMechanic::StaticStruct());
+            if (Executor) bExecutedAnything |= (*Executor)(Mechanic, Context);
+        }
+        return bExecutedAnything;
+    }
+
+    // Without a transport carrier, destination carriers originate from the user normally.
+    for (const TInstancedStruct<FGuMechanic>& Mechanic : GuDefinition->Mechanics)
+    {
+        const UScriptStruct* Type = Mechanic.GetScriptStruct();
+        if (!Type || !GuExecIsDeferredCarrierType(Type)) continue;
+
+        const FActivationExecutor* Executor = GuExecActivationExecutors().Find(Type);
+        if (Executor) bExecutedAnything |= (*Executor)(Mechanic, Context);
+    }
+
     return bExecutedAnything;
 }

@@ -66,6 +66,17 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
     bool ActivateGuEntity(FGuid EntityId);
 
+    /** Client-safe request to change the ordinary active Gu. The server validates aperture ownership. */
+    UFUNCTION(BlueprintCallable, Category="Gu|ECS")
+    void RequestSetActiveGuEntity(FGuid EntityId);
+
+    /** Client-safe activation of the currently selected physical Gu. */
+    UFUNCTION(BlueprintCallable, Category="Gu|ECS")
+    void RequestActivateActiveGu();
+
+    UFUNCTION(BlueprintPure, Category="Gu|ECS")
+    FGuid GetActiveGuEntityId() const;
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Abilities")
     TSubclassOf<UGameplayEffect> InitialAttributesEffect;
 
@@ -80,9 +91,8 @@ public:
 
     /**
      * Additional authored Gu initially owned in the aperture. These are physicalized
-     * into ECS for inventory/refinement/killer moves, but are not automatically
-     * granted standalone GAS input bindings yet. TestGuDefinition remains the
-     * currently activated test ability for backward compatibility.
+     * into ECS for inventory/refinement/killer moves and receive the same generic
+     * GAS ability bridge as every other physical Gu. The HUD chooses which one is active.
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Gu|Starting Inventory")
     TArray<TObjectPtr<UGuDefinition>> StartingGuDefinitions;
@@ -111,6 +121,18 @@ protected:
 
     /** Rebinds persisted physical Gu entities to the generic GAS ability after possession/load. */
     void BindPersistedGuAbilities();
+
+    /** Rebuilds the owner-only network projection from authoritative server ECS state. */
+    void RefreshOwnedGuPublicState();
+
+    bool SetActiveGuEntityAuthoritative(FGuid EntityId, FString& OutError);
+    bool ActivateActiveGuAuthoritative(FString& OutError);
+
+    UFUNCTION(Server, Reliable)
+    void ServerSetActiveGuEntity(FGuid EntityId);
+
+    UFUNCTION(Server, Reliable)
+    void ServerActivateActiveGu();
 
     void MoveInput(const FInputActionValue& Value);
     void LookInput(const FInputActionValue& Value);
