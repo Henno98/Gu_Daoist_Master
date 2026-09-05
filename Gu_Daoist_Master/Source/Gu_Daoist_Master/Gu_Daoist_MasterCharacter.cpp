@@ -17,6 +17,7 @@
 #include "GuInstanceObject.h"
 #include "GuPlayerState.h"
 #include "GuPersistenceSubsystem.h"
+#include "GuWildGuCaptureComponent.h"
 #include "Gu_Daoist_Master.h"
 #include "InputActionValue.h"
 #include "UGuDefinition.h"
@@ -125,6 +126,8 @@ AGu_Daoist_MasterCharacter::AGu_Daoist_MasterCharacter()
     AbilitySystemComponent->SetIsReplicated(true);
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
     AttributeSet = CreateDefaultSubobject<UAS_GuMasterAttributeSet>(TEXT("AttributeSet"));
+
+    WildGuCaptureComponent = CreateDefaultSubobject<UGuWildGuCaptureComponent>(TEXT("WildGuCaptureComponent"));
 }
 
 UAbilitySystemComponent* AGu_Daoist_MasterCharacter::GetAbilitySystemComponent() const
@@ -135,6 +138,59 @@ UAbilitySystemComponent* AGu_Daoist_MasterCharacter::GetAbilitySystemComponent()
 void AGu_Daoist_MasterCharacter::ActivateTestGu(const FInputActionValue& Value)
 {
     RequestActivateActiveGu();
+}
+
+void AGu_Daoist_MasterCharacter::DebugGenerateProceduralGuInput(const FInputActionValue& Value)
+{
+#if UE_BUILD_SHIPPING
+    return;
+#else
+    FProceduralGuGenerationRequest Request = DebugProceduralGuRequest;
+    // Empty PrimaryPath deliberately means Auto Path. The procedural compiler resolves
+    // a deterministic registered Data.Paths.* tag from the generation seed.
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Debug input: request procedural Gu. Path=%s Rank=%d Role=%d Seed=%d Complexity=%d"),
+        Request.PrimaryPath.IsValid() ? *Request.PrimaryPath.ToString() : TEXT("<Auto>"),
+        Request.Rank,
+        static_cast<int32>(Request.Role),
+        Request.Seed,
+        Request.Complexity);
+
+    RequestGenerateProceduralGu(Request);
+#endif
+}
+
+void AGu_Daoist_MasterCharacter::DebugCaptureNearestWildGuInput(const FInputActionValue& Value)
+{
+#if UE_BUILD_SHIPPING
+    return;
+#else
+    if (!WildGuCaptureComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Debug capture input ignored: WildGuCaptureComponent is unavailable."));
+        return;
+    }
+
+    WildGuCaptureComponent->RequestCaptureNearestWildGu();
+#endif
+}
+
+void AGu_Daoist_MasterCharacter::DebugInstantRefineLastCapturedGuInput(const FInputActionValue& Value)
+{
+#if UE_BUILD_SHIPPING
+    return;
+#else
+    if (!WildGuCaptureComponent)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Debug will-refinement input ignored: WildGuCaptureComponent is unavailable."));
+        return;
+    }
+
+    WildGuCaptureComponent->RequestDebugInstantRefineLastCapturedGu(EGuContainer::Aperture);
+#endif
 }
 
 bool AGu_Daoist_MasterCharacter::GrantGuAbilityForEntity(
@@ -197,6 +253,80 @@ bool AGu_Daoist_MasterCharacter::GrantGuAbilityForEntity(
         *EntityId.ToString());
 
     RefreshOwnedGuPublicState();
+    return true;
+}
+
+bool AGu_Daoist_MasterCharacter::SynchronizeOwnedApertureGu(
+    const FGuid EntityId,
+    FString& OutError)
+{
+    if (!HasAuthority())
+    {
+        OutError = TEXT("Runtime Gu synchronization is server-authoritative.");
+        return false;
+    }
+    if (!EntityId.IsValid())
+    {
+        OutError = TEXT("A valid physical Gu entity is required for runtime synchronization.");
+        return false;
+    }
+
+    AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UGuDefinitionRegistrySubsystem* Registry = GI ? GI->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
+    UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
+    if (!DomainPlayerState || !Registry || !Entities || DomainPlayerState->DomainCharacterId.IsEmpty())
+    {
+        OutError = TEXT("Character Gu runtime state is not ready for synchronization.");
+        return false;
+    }
+
+    const FOwnedByComponent* Ownership = Entities->GetOwnedBy(EntityId);
+    const FGuPlacementComponent* Placement = Entities->GetGuPlacement(EntityId);
+    const FGuInstanceComponent* Instance = Entities->GetGuInstance(EntityId);
+    if (!Ownership || Ownership->OwnerId != DomainPlayerState->DomainCharacterId)
+    {
+        OutError = TEXT("The physical Gu is not owned by this character.");
+        return false;
+    }
+    if (!Placement || Placement->Container != EGuContainer::Aperture)
+    {
+        OutError = TEXT("Only a Gu currently inside this character's aperture can be synchronized as an active Gu.");
+        return false;
+    }
+    if (!Instance)
+    {
+        OutError = TEXT("The physical Gu has no Gu instance component.");
+        return false;
+    }
+
+    UGuDefinition* ExecutableDefinition = const_cast<UGuDefinition*>(Registry->FindDefinitionAsset(Instance->DefinitionId));
+    if (!ExecutableDefinition)
+    {
+        OutError = FString::Printf(
+            TEXT("Gu definition '%s' has no executable UGuDefinition asset."),
+            *Instance->DefinitionId.ToString());
+        return false;
+    }
+
+    FGameplayAbilitySpecHandle Handle;
+    if (!GrantGuAbilityForEntity(EntityId, ExecutableDefinition, Handle, OutError))
+    {
+        return false;
+    }
+
+    // GrantGuAbilityForEntity refreshes when it creates a new bridge. Refresh again here
+    // deliberately so an already-bound entity that just re-entered the aperture is also projected.
+    RefreshOwnedGuPublicState();
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Synchronized runtime aperture Gu %s (%s) with GAS and active-Gu inventory."),
+        *EntityId.ToString(),
+        *Instance->DefinitionId.ToString());
+
+    OutError.Reset();
     return true;
 }
 
@@ -271,6 +401,30 @@ void AGu_Daoist_MasterCharacter::RequestActivateActiveGu()
     ServerActivateActiveGu();
 }
 
+void AGu_Daoist_MasterCharacter::RequestGenerateProceduralGu(
+    FProceduralGuGenerationRequest Request)
+{
+    if (HasAuthority())
+    {
+        FProceduralGuGenerationResult Result;
+        FString Error;
+        if (!GenerateProceduralGuAuthoritative(Request, Result, Error))
+        {
+            ClientProceduralGuGenerationFailed(Error);
+            return;
+        }
+
+        ClientProceduralGuGenerated(
+            Result.EntityId,
+            Result.DefinitionId,
+            Result.Name,
+            Result.Summary);
+        return;
+    }
+
+    ServerGenerateProceduralGu(Request);
+}
+
 FGuid AGu_Daoist_MasterCharacter::GetActiveGuEntityId() const
 {
     const AGuPlayerState* DomainPlayerState = GetPlayerState<AGuPlayerState>();
@@ -293,6 +447,108 @@ void AGu_Daoist_MasterCharacter::ServerActivateActiveGu_Implementation()
     {
         UE_LOG(LogTemp, Warning, TEXT("Server rejected active Gu activation: %s"), *Error);
     }
+}
+
+void AGu_Daoist_MasterCharacter::ServerGenerateProceduralGu_Implementation(
+    const FProceduralGuGenerationRequest& Request)
+{
+    FProceduralGuGenerationResult Result;
+    FString Error;
+    if (!GenerateProceduralGuAuthoritative(Request, Result, Error))
+    {
+        ClientProceduralGuGenerationFailed(Error);
+        return;
+    }
+
+    ClientProceduralGuGenerated(
+        Result.EntityId,
+        Result.DefinitionId,
+        Result.Name,
+        Result.Summary);
+}
+
+void AGu_Daoist_MasterCharacter::ClientProceduralGuGenerated_Implementation(
+    const FGuid EntityId,
+    const FName DefinitionId,
+    const FString& GuName,
+    const FString& Summary)
+{
+    K2_OnProceduralGuGenerated(EntityId, DefinitionId, GuName, Summary);
+}
+
+void AGu_Daoist_MasterCharacter::ClientProceduralGuGenerationFailed_Implementation(
+    const FString& Error)
+{
+    K2_OnProceduralGuGenerationFailed(Error);
+}
+
+bool AGu_Daoist_MasterCharacter::GenerateProceduralGuAuthoritative(
+    const FProceduralGuGenerationRequest& Request,
+    FProceduralGuGenerationResult& OutResult,
+    FString& OutError)
+{
+    OutResult = FProceduralGuGenerationResult();
+    OutError.Reset();
+
+    if (!HasAuthority())
+    {
+        OutError = TEXT("Procedural Gu generation must execute on server authority.");
+        return false;
+    }
+
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UGuProceduralGeneratorSubsystem* Generator = GI
+        ? GI->GetSubsystem<UGuProceduralGeneratorSubsystem>()
+        : nullptr;
+    if (!Generator)
+    {
+        OutError = TEXT("Procedural Gu generator subsystem is unavailable.");
+        return false;
+    }
+
+    if (!Generator->GenerateAndGrantGu(this, Request, OutResult, OutError))
+    {
+        return false;
+    }
+
+#if !UE_BUILD_SHIPPING
+    TArray<FString> MechanicNames;
+    MechanicNames.Reserve(OutResult.MechanicTypes.Num());
+    for (const FName MechanicType : OutResult.MechanicTypes)
+    {
+        MechanicNames.Add(MechanicType.ToString());
+    }
+
+    const FString GeneratedPath = OutResult.Definition && OutResult.Definition->Path.IsValid()
+        ? OutResult.Definition->Path.ToString()
+        : TEXT("<none>");
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Procedural Gu generated: Name='%s' Definition=%s Entity=%s Path=%s Role=%d Seed=%d Structure=%s Mechanics=[%s] Summary='%s'"),
+        *OutResult.Name,
+        *OutResult.DefinitionId.ToString(),
+        OutResult.EntityId.IsValid() ? *OutResult.EntityId.ToString() : TEXT("none"),
+        *GeneratedPath,
+        static_cast<int32>(OutResult.Role),
+        OutResult.Seed,
+        *OutResult.StructureSignature.ToString(),
+        *FString::Join(MechanicNames, TEXT(", ")),
+        *OutResult.Summary);
+#else
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Procedural Gu generated and granted: %s [%s] entity %s seed %d"),
+        *OutResult.Name,
+        *OutResult.DefinitionId.ToString(),
+        OutResult.EntityId.IsValid() ? *OutResult.EntityId.ToString() : TEXT("none"),
+        OutResult.Seed);
+#endif
+
+    OutError.Reset();
+    return true;
 }
 
 bool AGu_Daoist_MasterCharacter::SetActiveGuEntityAuthoritative(const FGuid EntityId, FString& OutError)
@@ -658,6 +914,33 @@ void AGu_Daoist_MasterCharacter::SetupPlayerInputComponent(UInputComponent* Play
                 ETriggerEvent::Started,
                 this,
                 &AGu_Daoist_MasterCharacter::ActivateTestGu);
+        }
+
+        if (DebugGenerateProceduralGuAction)
+        {
+            EnhancedInputComponent->BindAction(
+                DebugGenerateProceduralGuAction,
+                ETriggerEvent::Started,
+                this,
+                &AGu_Daoist_MasterCharacter::DebugGenerateProceduralGuInput);
+        }
+
+        if (DebugCaptureNearestWildGuAction)
+        {
+            EnhancedInputComponent->BindAction(
+                DebugCaptureNearestWildGuAction,
+                ETriggerEvent::Started,
+                this,
+                &AGu_Daoist_MasterCharacter::DebugCaptureNearestWildGuInput);
+        }
+
+        if (DebugInstantRefineLastCapturedGuAction)
+        {
+            EnhancedInputComponent->BindAction(
+                DebugInstantRefineLastCapturedGuAction,
+                ETriggerEvent::Started,
+                this,
+                &AGu_Daoist_MasterCharacter::DebugInstantRefineLastCapturedGuInput);
         }
     }
     else

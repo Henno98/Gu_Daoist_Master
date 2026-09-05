@@ -65,6 +65,8 @@ public:
 private:
     static FString NameKey(const FString& Name);
     static bool ValidateAndNormalize(FGuDefinitionRecord& InOutDefinition, FString& OutError);
+    FName ResolveDefinitionAlias(FName Id) const;
+    void RetargetDefinitionIdentity(FName OldId, FName NewId);
 
     TMap<FName, FGuDefinitionRecord> DefinitionsById;
     UPROPERTY(Transient)
@@ -75,6 +77,10 @@ private:
     TMap<FName, TObjectPtr<UGuDefinition>> RuntimeAssetsById;
 
     TMap<FString, FName> IdByName;
+
+    /** Object/legacy IDs that resolve to the current canonical species ID. */
+    TMap<FName, FName> DefinitionAliases;
+
     TSet<FName> RuntimeDefinitionIds;
     TMap<FString, FName> RuntimeIdByFingerprint;
 };

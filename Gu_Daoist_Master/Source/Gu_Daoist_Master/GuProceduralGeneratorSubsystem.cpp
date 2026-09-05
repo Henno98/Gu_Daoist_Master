@@ -6,6 +6,7 @@
 #include "GuEntitySubsystem.h"
 #include "GuPlayerState.h"
 #include "GuPersistenceSubsystem.h"
+#include "GuPathTags.h"
 #include "GuRulesLibrary.h"
 #include "Gu_Daoist_MasterCharacter.h"
 #include "UGuDefinition.h"
@@ -333,10 +334,123 @@ namespace
         }
     }
 
+    float ProcGuSemanticScore(const FRefinementSemanticProfile& Profile, const TCHAR* KeyText)
+    {
+        const FName Key(KeyText);
+        return FMath::Max(
+            FMath::Max(Profile.Attributes.FindRef(Key), Profile.Properties.FindRef(Key)),
+            FMath::Max(Profile.Traits.FindRef(Key), Profile.Templates.FindRef(Key)));
+    }
+
+    void ProcGuApplySemanticAffinity(FProcGuPathAffinity& A, const FRefinementSemanticProfile& Profile)
+    {
+        const float Area = ProcGuSemanticScore(Profile, TEXT("area"));
+        const float Persistence = FMath::Max(ProcGuSemanticScore(Profile, TEXT("persistence")), ProcGuSemanticScore(Profile, TEXT("duration")));
+        const float Speed = ProcGuSemanticScore(Profile, TEXT("speed"));
+        const float Recovery = ProcGuSemanticScore(Profile, TEXT("recovery"));
+        const float Suppression = ProcGuSemanticScore(Profile, TEXT("suppression"));
+        const float Precision = FMath::Max(ProcGuSemanticScore(Profile, TEXT("precision")), ProcGuSemanticScore(Profile, TEXT("tracking")));
+        const float Concealment = ProcGuSemanticScore(Profile, TEXT("concealment"));
+        const float Efficiency = ProcGuSemanticScore(Profile, TEXT("efficiency"));
+        const float Link = ProcGuSemanticScore(Profile, TEXT("link"));
+        const float Stability = ProcGuSemanticScore(Profile, TEXT("stability"));
+        const float Amplification = ProcGuSemanticScore(Profile, TEXT("amplification"));
+        const float Penetration = ProcGuSemanticScore(Profile, TEXT("penetration"));
+        const float Poison = ProcGuSemanticScore(Profile, TEXT("poison"));
+        const float Bleed = ProcGuSemanticScore(Profile, TEXT("bleed"));
+
+        A.Area = FMath::Clamp(A.Area + Area * .55f, .01f, 1.5f);
+        A.Persistent = FMath::Clamp(A.Persistent + Persistence * .55f, .01f, 1.5f);
+        A.Movement = FMath::Clamp(A.Movement + Speed * .45f, .01f, 1.5f);
+        A.Healing = FMath::Clamp(A.Healing + Recovery * .6f, .01f, 1.5f);
+        A.Control = FMath::Clamp(A.Control + Suppression * .6f, .01f, 1.5f);
+        A.Investigation = FMath::Clamp(A.Investigation + Precision * .5f, .01f, 1.5f);
+        A.Concealment = FMath::Clamp(A.Concealment + Concealment * .6f, .01f, 1.5f);
+        A.Resource = FMath::Clamp(A.Resource + Efficiency * .5f, .01f, 1.5f);
+        A.Link = FMath::Clamp(A.Link + Link * .7f, .01f, 1.5f);
+        A.Defense = FMath::Clamp(A.Defense + Stability * .45f, .01f, 1.5f);
+        A.Refinement = FMath::Clamp(A.Refinement + (Stability + Precision) * .25f, .01f, 1.5f);
+        A.Offense = FMath::Clamp(A.Offense + FMath::Max(FMath::Max(Amplification, Penetration), FMath::Max(Poison, Bleed)) * .5f, .01f, 1.5f);
+    }
+
+    FString ProcGuPathMotif(const FName Path, FRandomStream& Random)
+    {
+        const FString P = Path.ToString().ToLower();
+        auto Pick = [&Random](const TCHAR* const* Values, const int32 Count) { return Values[Random.RandRange(0, Count - 1)]; };
+
+        static const TCHAR* Moon[] = {TEXT("Crescent"),TEXT("Silver"),TEXT("Moonshadow"),TEXT("Pale"),TEXT("Nightglow"),TEXT("Lunar"),TEXT("Cold Moon"),TEXT("Moonbeam")};
+        static const TCHAR* Wind[] = {TEXT("Gale"),TEXT("Breeze"),TEXT("Whistling"),TEXT("Cloudwind"),TEXT("Drifting"),TEXT("Sky"),TEXT("Restless"),TEXT("Featherwind")};
+        static const TCHAR* Fire[] = {TEXT("Cinder"),TEXT("Ember"),TEXT("Scarlet"),TEXT("Ash"),TEXT("Blazing"),TEXT("Flame"),TEXT("Smoldering"),TEXT("Fireheart")};
+        static const TCHAR* Water[] = {TEXT("Ripple"),TEXT("Deepwater"),TEXT("Clear Spring"),TEXT("Tide"),TEXT("Rain"),TEXT("Blue Current"),TEXT("Mistwater"),TEXT("River")};
+        static const TCHAR* Wood[] = {TEXT("Greenleaf"),TEXT("Bamboo"),TEXT("Vine"),TEXT("Old Root"),TEXT("Sap"),TEXT("Verdant"),TEXT("Thornwood"),TEXT("Young Shoot")};
+        static const TCHAR* Blood[] = {TEXT("Crimson"),TEXT("Bloodmist"),TEXT("Red Vein"),TEXT("Heartblood"),TEXT("Sanguine"),TEXT("Bloodmoon"),TEXT("Scarlet"),TEXT("Red Tide")};
+        static const TCHAR* Lightning[] = {TEXT("Thunder"),TEXT("Lightning"),TEXT("Violet Spark"),TEXT("Storm"),TEXT("Heavenspark"),TEXT("Thunderclap"),TEXT("White Bolt"),TEXT("Stormflash")};
+        static const TCHAR* Ice[] = {TEXT("Frost"),TEXT("Cold"),TEXT("Snow"),TEXT("Iceglass"),TEXT("Frozen"),TEXT("White Frost"),TEXT("Rime"),TEXT("Winter")};
+        static const TCHAR* Shadow[] = {TEXT("Shadow"),TEXT("Dusk"),TEXT("Black Mist"),TEXT("Night"),TEXT("Hidden Shadow"),TEXT("Dark"),TEXT("Umbral"),TEXT("Silent Shade")};
+        static const TCHAR* Soul[] = {TEXT("Soulfire"),TEXT("Ghost"),TEXT("Spirit"),TEXT("Pale Soul"),TEXT("Wandering Soul"),TEXT("Soulmist"),TEXT("Phantom"),TEXT("Soul Echo")};
+        static const TCHAR* Poison[] = {TEXT("Venom"),TEXT("Miasma"),TEXT("Green Poison"),TEXT("Rot"),TEXT("Bitter"),TEXT("Toxic Mist"),TEXT("Poisonfang"),TEXT("Corroding")};
+        static const TCHAR* Star[] = {TEXT("Starlight"),TEXT("Falling Star"),TEXT("Astral"),TEXT("Starry"),TEXT("Seven-Star"),TEXT("Cold Star"),TEXT("Starshadow"),TEXT("Night Star")};
+        static const TCHAR* Generic[] = {TEXT("Jade"),TEXT("Iron"),TEXT("Hollow"),TEXT("Quiet"),TEXT("Flowing"),TEXT("Hidden"),TEXT("Coiling"),TEXT("Wandering"),TEXT("Falling"),TEXT("Rising"),TEXT("Returning"),TEXT("Clear")};
+
+        if (P == TEXT("moon")) return Pick(Moon, UE_ARRAY_COUNT(Moon));
+        if (P == TEXT("wind")) return Pick(Wind, UE_ARRAY_COUNT(Wind));
+        if (P == TEXT("fire")) return Pick(Fire, UE_ARRAY_COUNT(Fire));
+        if (P == TEXT("water")) return Pick(Water, UE_ARRAY_COUNT(Water));
+        if (P == TEXT("wood")) return Pick(Wood, UE_ARRAY_COUNT(Wood));
+        if (P == TEXT("blood")) return Pick(Blood, UE_ARRAY_COUNT(Blood));
+        if (P == TEXT("lightning")) return Pick(Lightning, UE_ARRAY_COUNT(Lightning));
+        if (P == TEXT("ice")) return Pick(Ice, UE_ARRAY_COUNT(Ice));
+        if (P == TEXT("dark") || P == TEXT("shadow") || P == TEXT("phantom")) return Pick(Shadow, UE_ARRAY_COUNT(Shadow));
+        if (P == TEXT("soul")) return Pick(Soul, UE_ARRAY_COUNT(Soul));
+        if (P == TEXT("poison")) return Pick(Poison, UE_ARRAY_COUNT(Poison));
+        if (P == TEXT("star")) return Pick(Star, UE_ARRAY_COUNT(Star));
+
+        const FString GenericWord = Pick(Generic, UE_ARRAY_COUNT(Generic));
+        if (!Path.IsNone() && Random.FRand() < .72f)
+        {
+            return Random.FRand() < .55f
+                ? FString::Printf(TEXT("%s %s"), *Path.ToString(), *GenericWord)
+                : Path.ToString();
+        }
+        return GenericWord;
+    }
+
+    FString ProcGuBuildGeneratedName(const FName Path, const EProceduralGuRole Role, const int32 Seed)
+    {
+        FRandomStream Random(ProcGuSubSeed(Seed, TEXT("name-v2")));
+        const FString Motif = ProcGuPathMotif(Path, Random);
+        const FString Noun = ProcGuRoleNoun(Role, Random);
+        static const TCHAR* Qualifiers[] = {TEXT("Quiet"),TEXT("Swift"),TEXT("Hidden"),TEXT("Coiling"),TEXT("Falling"),TEXT("Rising"),TEXT("Wandering"),TEXT("Still"),TEXT("Piercing"),TEXT("Soft"),TEXT("Hollow"),TEXT("Flowing"),TEXT("Returning"),TEXT("Broken")};
+        const FString Qualifier = Qualifiers[Random.RandRange(0, UE_ARRAY_COUNT(Qualifiers) - 1)];
+
+        switch (Random.RandRange(0, 3))
+        {
+        case 0: return FString::Printf(TEXT("%s %s Gu"), *Motif, *Noun);
+        case 1: return FString::Printf(TEXT("%s %s Gu"), *Qualifier, *Noun);
+        case 2: return FString::Printf(TEXT("%s %s Gu"), *Qualifier, *Motif);
+        default: return FString::Printf(TEXT("%s %s %s Gu"), *Motif, *Qualifier, *Noun);
+        }
+    }
+
+    bool ProcGuHasMechanicStruct(const UGuDefinition* Definition, const UScriptStruct* Type);
+
+    bool ProcGuHasImpactCarrier(const UGuDefinition* Definition)
+    {
+        return ProcGuHasMechanicStruct(Definition, FGuProjectileMechanic::StaticStruct())
+            || ProcGuHasMechanicStruct(Definition, FGuMeleeMechanic::StaticStruct())
+            || ProcGuHasMechanicStruct(Definition, FGuAreaMechanic::StaticStruct())
+            || ProcGuHasMechanicStruct(Definition, FGuFieldMechanic::StaticStruct());
+    }
+
     bool ProcGuFindProjectileTemplate(UGuDefinitionRegistrySubsystem* Registry, FGuProjectileMechanic& OutProjectile)
     {
         if (!Registry) return false;
-        for (const FGuDefinitionRecord& Record : Registry->GetAllDefinitions())
+        TArray<FGuDefinitionRecord> Records = Registry->GetAllDefinitions();
+        Records.Sort([](const FGuDefinitionRecord& A, const FGuDefinitionRecord& B)
+        {
+            return A.Id.ToString() < B.Id.ToString();
+        });
+        for (const FGuDefinitionRecord& Record : Records)
         {
             const UGuDefinition* Definition = Registry->FindDefinitionAsset(Record.Id);
             if (!Definition) continue;
@@ -365,8 +479,16 @@ namespace
     void ProcGuApplyAppearance(const FName Path, const EProceduralGuRole Role, const int32 Seed, FGuAppearanceSpec& Appearance)
     {
         Appearance.Seed = Seed;
-        Appearance.SchemaVersion = 1;
-        Appearance.Transform.Scale = 0.85f + static_cast<float>(FMath::Abs(Seed % 37)) / 100.0f;
+        Appearance.SchemaVersion = 2;
+
+        FRandomStream VisualRandom(ProcGuSubSeed(Seed, TEXT("appearance-v2")));
+        static const FName Archetypes[] = {TEXT("worm"),TEXT("beetle"),TEXT("moth"),TEXT("cicada"),TEXT("orb"),TEXT("seed"),TEXT("needle"),TEXT("shell")};
+        static const FName Silhouettes[] = {TEXT("pearl"),TEXT("slender"),TEXT("crescent"),TEXT("winged"),TEXT("segmented"),TEXT("spined"),TEXT("leaf"),TEXT("drop")};
+        static const FName Materials[] = {TEXT("jade"),TEXT("chitin"),TEXT("crystal"),TEXT("bone"),TEXT("mist"),TEXT("metal"),TEXT("wood"),TEXT("glass")};
+        Appearance.Archetype = Archetypes[VisualRandom.RandRange(0, UE_ARRAY_COUNT(Archetypes) - 1)];
+        Appearance.Silhouette = Silhouettes[VisualRandom.RandRange(0, UE_ARRAY_COUNT(Silhouettes) - 1)];
+        Appearance.Material = Materials[VisualRandom.RandRange(0, UE_ARRAY_COUNT(Materials) - 1)];
+        Appearance.Transform.Scale = 0.72f + VisualRandom.FRandRange(0.0f, 0.48f);
         Appearance.Anatomy.Segments = 2 + FMath::Abs(Seed % 7);
         Appearance.Anatomy.EyeCount = Role == EProceduralGuRole::Investigation ? 1 + FMath::Abs((Seed / 7) % 4) : FMath::Abs((Seed / 13) % 2);
         Appearance.Anatomy.LegPairs = Role == EProceduralGuRole::Movement ? 2 + FMath::Abs((Seed / 17) % 3) : FMath::Abs((Seed / 19) % 2);
@@ -781,6 +903,344 @@ namespace
         }
     }
 
+    enum class EProcGuDiversityModule : uint8
+    {
+        Chain,
+        Periodic,
+        Restriction,
+        Displacement,
+        Suppression,
+        Mark,
+        Area,
+        Field,
+        Cleanse,
+        Dispel,
+        Attention,
+        Shield,
+        Heal,
+        Concealment,
+        Reveal,
+        EssenceDrain
+    };
+
+    bool ProcGuTryAddDiversityModule(
+        UGuDefinition* Definition,
+        const EProcGuDiversityModule Module,
+        const EProceduralGuRole Role,
+        const int32 Rank,
+        const float Budget,
+        FRandomStream& Random)
+    {
+        if (!Definition) return false;
+        const bool bImpactCarrier = ProcGuHasImpactCarrier(Definition);
+
+        switch (Module)
+        {
+        case EProcGuDiversityModule::Chain:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuChainMechanic::StaticStruct())) return false;
+            {
+                FGuChainMechanic Value;
+                Value.JumpRadius = 260.0f + Rank * 55.0f + Random.FRandRange(0.0f, 180.0f);
+                Value.MaxAdditionalTargets = FMath::Clamp(1 + Rank / 2 + Random.RandRange(0, 2), 1, 8);
+                Value.MagnitudeFalloff = Random.FRandRange(.62f, .9f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Periodic:
+            if (Role == EProceduralGuRole::Offense && bImpactCarrier && !ProcGuHasMechanicStruct(Definition, FGuDamageOverTimeMechanic::StaticStruct()))
+            {
+                FGuDamageOverTimeMechanic Value;
+                Value.DamagePerTick = Budget * Random.FRandRange(.055f, .11f);
+                Value.TickInterval = Random.FRandRange(.45f, 1.1f);
+                Value.Duration = 2.0f + Rank * Random.FRandRange(.45f, .9f);
+                Value.Recipient = EGuMechanicRecipient::ImpactTarget;
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+            if ((Role == EProceduralGuRole::Healing || Role == EProceduralGuRole::Support || Role == EProceduralGuRole::Defense)
+                && !ProcGuHasMechanicStruct(Definition, FGuHealOverTimeMechanic::StaticStruct()))
+            {
+                FGuHealOverTimeMechanic Value;
+                Value.HealPerTick = Budget * Random.FRandRange(.04f, .08f);
+                Value.TickInterval = Random.FRandRange(.6f, 1.2f);
+                Value.Duration = 2.5f + Rank * Random.FRandRange(.45f, .85f);
+                Value.Recipient = EGuMechanicRecipient::Self;
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+            return false;
+
+        case EProcGuDiversityModule::Restriction:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuRestrictionMechanic::StaticStruct())) return false;
+            {
+                FGuRestrictionMechanic Value;
+                Value.MovementMultiplier = FMath::Clamp(Random.FRandRange(.25f, .72f) - Rank * .025f, .08f, .8f);
+                Value.Duration = Random.FRandRange(1.0f, 2.0f) + Rank * .3f;
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Displacement:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuDisplacementMechanic::StaticStruct())) return false;
+            {
+                FGuDisplacementMechanic Value;
+                const int32 Mode = Random.RandRange(0, 3);
+                Value.Mode = static_cast<EGuDisplacementMode>(Mode);
+                Value.Strength = 220.0f + Rank * 75.0f + Random.FRandRange(0.0f, 240.0f);
+                Value.VerticalStrength = Mode >= 2 ? Random.FRandRange(80.0f, 340.0f) : Random.FRandRange(-40.0f, 120.0f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Suppression:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuGuSuppressionMechanic::StaticStruct())) return false;
+            {
+                FGuGuSuppressionMechanic Value;
+                Value.Duration = .55f + Rank * Random.FRandRange(.16f, .34f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Mark:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuMarkMechanic::StaticStruct())) return false;
+            {
+                FGuMarkMechanic Value;
+                Value.MarkId = FName(*FString::Printf(TEXT("ProceduralMark_%d"), FMath::Abs(Random.RandHelper(99991))));
+                Value.Strength = .7f + Rank * .12f + Random.FRandRange(0.0f, .35f);
+                Value.Duration = 2.0f + Rank * Random.FRandRange(.55f, 1.1f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Area:
+            if (ProcGuHasMechanicStruct(Definition, FGuAreaMechanic::StaticStruct()) || ProcGuHasMechanicStruct(Definition, FGuFieldMechanic::StaticStruct())) return false;
+            {
+                FGuAreaMechanic Value;
+                Value.Radius = 115.0f + Rank * 32.0f + Random.FRandRange(0.0f, 120.0f);
+                Value.ForwardOffset = Random.FRandRange(40.0f, 160.0f);
+                Value.MaxTargets = Random.FRand() < .55f ? 0 : FMath::Clamp(1 + Rank / 2, 1, 8);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Field:
+            if (ProcGuHasMechanicStruct(Definition, FGuFieldMechanic::StaticStruct())
+                || ProcGuHasMechanicStruct(Definition, FGuAreaMechanic::StaticStruct())) return false;
+            {
+                FGuFieldMechanic Value;
+                Value.Radius = 140.0f + Rank * 38.0f + Random.FRandRange(0.0f, 150.0f);
+                Value.ForwardOffset = Random.FRandRange(60.0f, 180.0f);
+                Value.TickInterval = Random.FRandRange(.4f, 1.0f);
+                Value.Duration = 2.0f + Rank * Random.FRandRange(.45f, .9f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Cleanse:
+            if (ProcGuHasMechanicStruct(Definition, FGuCleanseMechanic::StaticStruct())) return false;
+            ProcGuAddMechanic(Definition, FGuCleanseMechanic());
+            return true;
+
+        case EProcGuDiversityModule::Dispel:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuDispelMechanic::StaticStruct())) return false;
+            ProcGuAddMechanic(Definition, FGuDispelMechanic());
+            return true;
+
+        case EProcGuDiversityModule::Attention:
+            if (ProcGuHasMechanicStruct(Definition, FGuAttentionBoostMechanic::StaticStruct())) return false;
+            {
+                FGuAttentionBoostMechanic Value;
+                Value.SlotsGranted = FMath::Clamp(1 + Rank / 3 + Random.RandRange(0, 1), 1, 5);
+                Value.Duration = 3.0f + Rank * Random.FRandRange(.7f, 1.2f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Shield:
+            if (ProcGuHasMechanicStruct(Definition, FGuShieldMechanic::StaticStruct())) return false;
+            {
+                FGuShieldMechanic Value;
+                Value.Amount = Budget * Random.FRandRange(.18f, .38f);
+                Value.Duration = 2.5f + Rank * Random.FRandRange(.45f, .85f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Heal:
+            if (ProcGuHasMechanicStruct(Definition, FGuHealMechanic::StaticStruct())) return false;
+            {
+                FGuHealMechanic Value;
+                Value.Amount = Budget * Random.FRandRange(.15f, .32f);
+                Value.Recipient = EGuMechanicRecipient::Self;
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Concealment:
+            if (ProcGuHasMechanicStruct(Definition, FGuConcealmentMechanic::StaticStruct())) return false;
+            {
+                FGuConcealmentMechanic Value;
+                Value.Opacity = Random.FRandRange(.08f, .3f);
+                Value.DetectionResistance = FMath::Clamp(.18f + Rank * .055f + Random.FRandRange(0.0f, .18f), .18f, .85f);
+                Value.Duration = 2.5f + Rank * Random.FRandRange(.55f, 1.05f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::Reveal:
+            if (ProcGuHasMechanicStruct(Definition, FGuRevealMechanic::StaticStruct())) return false;
+            {
+                FGuRevealMechanic Value;
+                Value.Range = 450.0f + Rank * 170.0f + Random.FRandRange(0.0f, 350.0f);
+                Value.Duration = 1.5f + Rank * Random.FRandRange(.4f, .8f);
+                Value.Strength = .6f + Rank * .12f + Random.FRandRange(0.0f, .35f);
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+
+        case EProcGuDiversityModule::EssenceDrain:
+            if (!bImpactCarrier || ProcGuHasMechanicStruct(Definition, FGuEssenceChangeMechanic::StaticStruct())) return false;
+            {
+                FGuEssenceChangeMechanic Value;
+                Value.Mode = EGuEssenceChangeMode::Drain;
+                Value.Amount = FMath::Clamp(1.5f + Rank * Random.FRandRange(.7f, 1.6f), 1.0f, 22.0f);
+                Value.bPercentOfMaximum = true;
+                Value.Recipient = EGuMechanicRecipient::ImpactTarget;
+                Value.bTransferDrainedEssenceToSource = Random.FRand() < .6f;
+                ProcGuAddMechanic(Definition, Value);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void ProcGuApplyStructuralDiversity(
+        UGuDefinition* Definition,
+        const FProcGuPathAffinity& A,
+        const FRefinementSemanticProfile* SemanticProfile,
+        const EProceduralGuRole Role,
+        const int32 Rank,
+        const int32 Complexity,
+        FRandomStream& Random)
+    {
+        if (!Definition) return;
+        const float Budget = ProcGuRankPowerBudget(Rank);
+        auto S = [SemanticProfile](const TCHAR* Key)
+        {
+            return SemanticProfile ? ProcGuSemanticScore(*SemanticProfile, Key) : 0.0f;
+        };
+
+        const float Link = FMath::Max(A.Link, S(TEXT("link")));
+        const float Persistence = FMath::Max(A.Persistent, FMath::Max(S(TEXT("persistence")), S(TEXT("duration"))));
+        const float Area = FMath::Max(A.Area, S(TEXT("area")));
+        const float Control = FMath::Max(A.Control, S(TEXT("suppression")));
+        const float Precision = FMath::Max(A.Investigation, FMath::Max(S(TEXT("precision")), S(TEXT("tracking"))));
+        const float Recovery = FMath::Max(A.Healing, S(TEXT("recovery")));
+        const float Conceal = FMath::Max(A.Concealment, S(TEXT("concealment")));
+        const float Resource = FMath::Max(A.Resource, S(TEXT("efficiency")));
+
+        struct FCandidate
+        {
+            EProcGuDiversityModule Module;
+            float Weight;
+        };
+        TArray<FCandidate> Candidates;
+        auto Add = [&Candidates](const EProcGuDiversityModule Module, const float Weight)
+        {
+            Candidates.Add({Module, FMath::Max(.01f, Weight)});
+        };
+
+        switch (Role)
+        {
+        case EProceduralGuRole::Offense:
+            Add(EProcGuDiversityModule::Chain, .15f + Link * .8f);
+            Add(EProcGuDiversityModule::Periodic, .18f + Persistence * .75f + FMath::Max(S(TEXT("poison")), S(TEXT("bleed"))) * .5f);
+            Add(EProcGuDiversityModule::Restriction, .12f + Control * .55f);
+            Add(EProcGuDiversityModule::Displacement, .14f + (Control + A.Movement) * .32f);
+            Add(EProcGuDiversityModule::Mark, .1f + (Link + Precision) * .35f);
+            Add(EProcGuDiversityModule::Area, .1f + Area * .55f);
+            Add(EProcGuDiversityModule::EssenceDrain, .05f + Resource * .25f);
+            break;
+        case EProceduralGuRole::Defense:
+            Add(EProcGuDiversityModule::Cleanse, .2f + Recovery * .4f);
+            Add(EProcGuDiversityModule::Heal, .15f + Recovery * .45f);
+            Add(EProcGuDiversityModule::Attention, .12f + Resource * .3f);
+            Add(EProcGuDiversityModule::Concealment, .08f + Conceal * .3f);
+            break;
+        case EProceduralGuRole::Movement:
+            Add(EProcGuDiversityModule::Concealment, .2f + Conceal * .55f);
+            Add(EProcGuDiversityModule::Shield, .14f + A.Defense * .3f);
+            Add(EProcGuDiversityModule::Attention, .12f + Resource * .3f);
+            Add(EProcGuDiversityModule::Reveal, .08f + Precision * .22f);
+            break;
+        case EProceduralGuRole::Healing:
+            Add(EProcGuDiversityModule::Periodic, .25f + Persistence * .6f);
+            Add(EProcGuDiversityModule::Cleanse, .22f + Recovery * .45f);
+            Add(EProcGuDiversityModule::Shield, .17f + A.Defense * .35f);
+            Add(EProcGuDiversityModule::Attention, .08f + Resource * .25f);
+            break;
+        case EProceduralGuRole::Control:
+            Add(EProcGuDiversityModule::Field, .15f + (Area + Persistence) * .45f);
+            Add(EProcGuDiversityModule::Suppression, .22f + Control * .55f);
+            Add(EProcGuDiversityModule::Displacement, .18f + (Control + A.Movement) * .3f);
+            Add(EProcGuDiversityModule::Mark, .12f + Link * .45f);
+            Add(EProcGuDiversityModule::Chain, .08f + Link * .35f);
+            Add(EProcGuDiversityModule::Dispel, .08f + Control * .28f);
+            break;
+        case EProceduralGuRole::Investigation:
+            Add(EProcGuDiversityModule::Attention, .2f + Precision * .5f);
+            Add(EProcGuDiversityModule::Concealment, .1f + Conceal * .35f);
+            Add(EProcGuDiversityModule::Shield, .08f + A.Defense * .2f);
+            break;
+        case EProceduralGuRole::Concealment:
+            Add(EProcGuDiversityModule::Attention, .12f + Precision * .25f);
+            Add(EProcGuDiversityModule::Reveal, .08f + Precision * .25f);
+            Add(EProcGuDiversityModule::Shield, .08f + A.Defense * .2f);
+            break;
+        case EProceduralGuRole::Resource:
+            Add(EProcGuDiversityModule::Attention, .22f + Resource * .45f);
+            Add(EProcGuDiversityModule::Heal, .12f + Recovery * .3f);
+            Add(EProcGuDiversityModule::Shield, .1f + A.Defense * .25f);
+            Add(EProcGuDiversityModule::Cleanse, .1f + Recovery * .25f);
+            break;
+        case EProceduralGuRole::Refinement:
+            Add(EProcGuDiversityModule::Attention, .25f + Precision * .4f);
+            Add(EProcGuDiversityModule::Cleanse, .14f + Recovery * .25f);
+            Add(EProcGuDiversityModule::Reveal, .1f + Precision * .25f);
+            break;
+        default:
+            Add(EProcGuDiversityModule::Heal, .14f + Recovery * .3f);
+            Add(EProcGuDiversityModule::Shield, .14f + A.Defense * .3f);
+            Add(EProcGuDiversityModule::Reveal, .1f + Precision * .25f);
+            Add(EProcGuDiversityModule::Attention, .12f + Resource * .25f);
+            Add(EProcGuDiversityModule::Cleanse, .08f + Recovery * .2f);
+            break;
+        }
+
+        const int32 DesiredAdds = FMath::Clamp(1 + (Complexity >= 3 ? 1 : 0) + (Rank >= 5 && Complexity >= 4 ? 1 : 0), 1, 3);
+        for (int32 Added = 0, Attempts = 0; Added < DesiredAdds && Attempts < DesiredAdds * 8 && !Candidates.IsEmpty(); ++Attempts)
+        {
+            float TotalWeight = 0.0f;
+            for (const FCandidate& Candidate : Candidates) TotalWeight += Candidate.Weight;
+            float Cursor = Random.FRandRange(0.0f, FMath::Max(.01f, TotalWeight));
+            int32 PickedIndex = Candidates.Num() - 1;
+            for (int32 Index = 0; Index < Candidates.Num(); ++Index)
+            {
+                Cursor -= Candidates[Index].Weight;
+                if (Cursor <= 0.0f)
+                {
+                    PickedIndex = Index;
+                    break;
+                }
+            }
+
+            const EProcGuDiversityModule Picked = Candidates[PickedIndex].Module;
+            Candidates.RemoveAtSwap(PickedIndex);
+            if (ProcGuTryAddDiversityModule(Definition, Picked, Role, Rank, Budget, Random)) ++Added;
+        }
+    }
+
     void ProcGuBuildMechanicComposition(UGuDefinition* Definition, UGuDefinitionRegistrySubsystem* Registry, const FProcGuPathAffinity& Affinity, const EProceduralGuRole Role, const int32 Rank, const int32 Complexity, FRandomStream& Random)
     {
         const float Budget = ProcGuRankPowerBudget(Rank);
@@ -820,6 +1280,57 @@ namespace
             Parts.Add(Name);
         }
         return Parts.IsEmpty() ? TEXT("semantic-only") : FString::Join(Parts, TEXT(" + "));
+    }
+
+    void ProcGuPopulateStructureResult(const UGuDefinition* Definition, FProceduralGuGenerationResult& OutResult)
+    {
+        OutResult.MechanicTypes.Reset();
+        if (!Definition)
+        {
+            OutResult.StructureSignature = NAME_None;
+            return;
+        }
+
+        TArray<FString> SignatureParts;
+        for (const TInstancedStruct<FGuMechanic>& Entry : Definition->Mechanics)
+        {
+            const UScriptStruct* Struct = Entry.GetScriptStruct();
+            if (!Struct || Struct == FGuEssenceCostMechanic::StaticStruct()) continue;
+
+            FString Name = Struct->GetName();
+            Name.RemoveFromStart(TEXT("FGu"));
+            Name.RemoveFromStart(TEXT("Gu"));
+            Name.RemoveFromEnd(TEXT("Mechanic"));
+            OutResult.MechanicTypes.AddUnique(FName(*Name));
+
+            FString Part = Name.ToLower();
+            if (const FGuMovementMechanic* Movement = Entry.GetPtr<FGuMovementMechanic>())
+            {
+                Part += FString::Printf(TEXT(":mode=%d"), static_cast<int32>(Movement->Mode));
+            }
+            else if (const FGuDisplacementMechanic* Displacement = Entry.GetPtr<FGuDisplacementMechanic>())
+            {
+                Part += FString::Printf(TEXT(":mode=%d"), static_cast<int32>(Displacement->Mode));
+            }
+            else if (const FGuEssenceChangeMechanic* Essence = Entry.GetPtr<FGuEssenceChangeMechanic>())
+            {
+                Part += FString::Printf(TEXT(":mode=%d:recipient=%d"), static_cast<int32>(Essence->Mode), static_cast<int32>(Essence->Recipient));
+            }
+            else if (const FGuHealMechanic* Heal = Entry.GetPtr<FGuHealMechanic>())
+            {
+                Part += FString::Printf(TEXT(":recipient=%d"), static_cast<int32>(Heal->Recipient));
+            }
+            else if (const FGuShieldMechanic* Shield = Entry.GetPtr<FGuShieldMechanic>())
+            {
+                Part += FString::Printf(TEXT(":recipient=%d"), static_cast<int32>(Shield->Recipient));
+            }
+            SignatureParts.Add(MoveTemp(Part));
+        }
+
+        OutResult.MechanicTypes.Sort([](const FName& A, const FName& B) { return A.ToString() < B.ToString(); });
+        SignatureParts.Sort();
+        const FString Canonical = FString::Join(SignatureParts, TEXT("|"));
+        OutResult.StructureSignature = FName(*FString::Printf(TEXT("structure_%08x"), ProcGuFnv1a32(Canonical)));
     }
 }
 
@@ -871,16 +1382,47 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
     OutDefinition = nullptr;
     OutRecord = FGuDefinitionRecord();
 
-    if (!ProcGuIsCanonicalPathTag(Request.PrimaryPath))
-    {
-        OutError = TEXT("Procedural Gu require a canonical Gameplay Tag path such as Data.Paths.Moon.");
-        return false;
-    }
-
     const int32 Rank = FMath::Clamp(Request.Rank, 1, 9);
     OutEffectiveSeed = Request.Seed != 0 ? Request.Seed : FMath::RandRange(1, MAX_int32);
-    const FName PrimaryPath = ProcGuPathLeaf(Request.PrimaryPath);
-    const FProcGuPathAffinity Affinity = ProcGuCombinedAffinity(Request.PrimaryPath, Request.SecondaryPaths);
+
+    FGameplayTag ResolvedPrimaryPath;
+    if (Request.PrimaryPath.IsValid())
+    {
+        // Accept canonical Data.Paths.X and tolerate old/singular Data.Path.X-style authored values
+        // by resolving the leaf against the native path vocabulary.
+        ResolvedPrimaryPath = GuPathTags::FindByLeaf(ProcGuPathLeaf(Request.PrimaryPath));
+        if (!ResolvedPrimaryPath.IsValid())
+        {
+            OutError = FString::Printf(
+                TEXT("Unknown procedural Gu Path '%s'. Choose a registered Data.Paths.* tag or leave PrimaryPath empty for Auto Path."),
+                *Request.PrimaryPath.ToString());
+            return false;
+        }
+    }
+    else
+    {
+        const TArray<FGameplayTag>& RegisteredPaths = GuPathTags::GetAll();
+        if (RegisteredPaths.IsEmpty())
+        {
+            OutError = TEXT("No native Gu Path Gameplay Tags are registered.");
+            return false;
+        }
+        FRandomStream PathRandom(ProcGuSubSeed(OutEffectiveSeed, TEXT("primary-path")));
+        ResolvedPrimaryPath = RegisteredPaths[PathRandom.RandRange(0, RegisteredPaths.Num() - 1)];
+    }
+
+    FGameplayTagContainer ResolvedSecondaryPaths;
+    for (const FGameplayTag& SecondaryPath : ResolvedSecondaryPaths.GetGameplayTagArray())
+    {
+        const FGameplayTag ResolvedSecondary = GuPathTags::FindByLeaf(ProcGuPathLeaf(SecondaryPath));
+        if (ResolvedSecondary.IsValid() && ResolvedSecondary != ResolvedPrimaryPath)
+        {
+            ResolvedSecondaryPaths.AddTag(ResolvedSecondary);
+        }
+    }
+
+    const FName PrimaryPath = ProcGuPathLeaf(ResolvedPrimaryPath);
+    const FProcGuPathAffinity Affinity = ProcGuCombinedAffinity(ResolvedPrimaryPath, ResolvedSecondaryPaths);
     FRandomStream RoleRandom(ProcGuSubSeed(OutEffectiveSeed, TEXT("role")));
     OutRole = Request.Role == EProceduralGuRole::Auto ? ProcGuPickWeightedRole(Affinity, RoleRandom) : Request.Role;
     const int32 Complexity = Request.Complexity > 0
@@ -888,18 +1430,15 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
         : FMath::Clamp((Rank - 1) / 2, 0, 4);
 
     TArray<FString> SecondaryPathNames;
-    for (const FGameplayTag& SecondaryPath : Request.SecondaryPaths.GetGameplayTagArray())
+    for (const FGameplayTag& SecondaryPath : ResolvedSecondaryPaths.GetGameplayTagArray())
     {
-        if (ProcGuIsCanonicalPathTag(SecondaryPath) && SecondaryPath != Request.PrimaryPath)
-        {
-            SecondaryPathNames.AddUnique(SecondaryPath.ToString());
-        }
+        SecondaryPathNames.AddUnique(SecondaryPath.ToString());
     }
     SecondaryPathNames.Sort();
 
     const FString SignatureSource = FString::Printf(
-        TEXT("proc-v1|%s|secondary=%s|rank=%d|seed=%d|role=%s|complexity=%d|consumable=%d"),
-        *Request.PrimaryPath.ToString(),
+        TEXT("proc-v2|%s|secondary=%s|rank=%d|seed=%d|role=%s|complexity=%d|consumable=%d"),
+        *ResolvedPrimaryPath.ToString(),
         *FString::Join(SecondaryPathNames, TEXT(",")),
         Rank,
         OutEffectiveSeed,
@@ -907,7 +1446,7 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
         Complexity,
         Request.bAllowConsumable ? 1 : 0);
     const uint32 Signature = ProcGuFnv1a32(SignatureSource);
-    const FString StableIdText = FString::Printf(TEXT("proc_%s_r%d_%08x"), *PrimaryPath.ToString().ToLower(), Rank, Signature);
+    const FString StableIdText = FString::Printf(TEXT("proc2_%s_r%d_%08x"), *PrimaryPath.ToString().ToLower(), Rank, Signature);
     const FName StableId(*StableIdText);
 
     UGuDefinitionRegistrySubsystem* Registry = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGuDefinitionRegistrySubsystem>() : nullptr;
@@ -938,11 +1477,11 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
 
     Definition->StableDefinitionId = StableId;
     Definition->Rank = Rank;
-    Definition->Path = Request.PrimaryPath;
+    Definition->Path = ResolvedPrimaryPath;
     Definition->SecondaryPaths.Reset();
-    for (const FGameplayTag& SecondaryPath : Request.SecondaryPaths.GetGameplayTagArray())
+    for (const FGameplayTag& SecondaryPath : ResolvedSecondaryPaths.GetGameplayTagArray())
     {
-        if (ProcGuIsCanonicalPathTag(SecondaryPath) && SecondaryPath != Request.PrimaryPath)
+        if (SecondaryPath.IsValid() && SecondaryPath != ResolvedPrimaryPath)
         {
             Definition->SecondaryPaths.AddTag(SecondaryPath);
         }
@@ -955,8 +1494,7 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
     Definition->Lifecycle.ConsumeOn = EGuConsumeOn::SuccessfulActivation;
     Definition->Lifecycle.Charges = Definition->Lifecycle.bConsumable ? FMath::Clamp(1 + Rank / 3, 1, 4) : 1;
 
-    FRandomStream NameRandom(ProcGuSubSeed(OutEffectiveSeed, TEXT("name")));
-    FString CandidateName = FString::Printf(TEXT("%s %s Gu"), *PrimaryPath.ToString(), ProcGuRoleNoun(OutRole, NameRandom));
+    FString CandidateName = ProcGuBuildGeneratedName(PrimaryPath, OutRole, OutEffectiveSeed);
     if (Registry->HasDefinition(FName(*CandidateName)))
     {
         CandidateName = FString::Printf(TEXT("%s %04X Gu"), *CandidateName.LeftChop(3), Signature & 0xffffu);
@@ -966,6 +1504,8 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
     ProcGuApplyAppearance(PrimaryPath, OutRole, OutEffectiveSeed, Definition->Appearance);
     FRandomStream MechanicsRandom(ProcGuSubSeed(OutEffectiveSeed, TEXT("mechanics")));
     ProcGuBuildMechanicComposition(Definition, Registry, Affinity, OutRole, Rank, Complexity, MechanicsRandom);
+    FRandomStream DiversityRandom(ProcGuSubSeed(OutEffectiveSeed, TEXT("diversity-v2")));
+    ProcGuApplyStructuralDiversity(Definition, Affinity, nullptr, OutRole, Rank, Complexity, DiversityRandom);
 
     FGuDefinitionRecord Record;
     if (!UGuDefinitionRegistrySubsystem::BuildRecordFromAsset(Definition, Record, OutError)) return false;
@@ -974,7 +1514,7 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
     Record.Name = CandidateName;
     Record.Path = PrimaryPath;
     Record.SecondaryPaths.Reset();
-    for (const FGameplayTag& Secondary : Request.SecondaryPaths.GetGameplayTagArray())
+    for (const FGameplayTag& Secondary : ResolvedSecondaryPaths.GetGameplayTagArray())
     {
         const FName Leaf = ProcGuPathLeaf(Secondary);
         if (!Leaf.IsNone() && Leaf != PrimaryPath) Record.SecondaryPaths.AddUnique(Leaf);
@@ -983,14 +1523,15 @@ bool UGuProceduralGeneratorSubsystem::BuildGeneratedDefinition(
     Record.Category = FName(*ProcGuRoleCategory(OutRole));
     Record.FunctionalRoles = {Record.Category};
     Record.Description = FString::Printf(
-        TEXT("Procedurally generated Rank %d %s-path Gu. Seed %d compiled into reusable Gu mechanics rather than a bespoke ability class."),
+        TEXT("Procedurally compiled Rank %d %s-path Gu. Seed %d selects a deterministic composition of reusable carrier, payload, modifier, lifecycle, semantic, and appearance modules."),
         Rank, *PrimaryPath.ToString(), OutEffectiveSeed);
     Record.PowerProfile.BaseBudget = ProcGuRankPowerBudget(Rank);
     Record.PowerProfile.EffectiveBudget = ProcGuRankPowerBudget(Rank);
     Record.PowerProfile.ConstraintMultiplier = Definition->Lifecycle.bConsumable ? 1.15f : 1.0f;
-    Record.Source = FString::Printf(TEXT("Procedural Gu generator v1; seed=%d; role=%s"), OutEffectiveSeed, *RoleToString(OutRole));
+    Record.Source = FString::Printf(TEXT("Procedural Gu species compiler v2; seed=%d; role=%s"), OutEffectiveSeed, *RoleToString(OutRole));
     Record.Tags.AddUnique(TEXT("procedural"));
-    Record.Tags.AddUnique(TEXT("generator:v1"));
+    Record.Tags.AddUnique(TEXT("generator:v2"));
+    Record.Tags.AddUnique(TEXT("origin:procedural"));
     Record.Tags.AddUnique(FName(*FString::Printf(TEXT("seed:%d"), OutEffectiveSeed)));
     Record.Tags.AddUnique(FName(*FString::Printf(TEXT("complexity:%d"), Complexity)));
     Record.Tags.AddUnique(FName(*FString::Printf(TEXT("role:%s"), *RoleToString(OutRole).ToLower())));
@@ -1045,6 +1586,7 @@ bool UGuProceduralGeneratorSubsystem::GenerateAndRegisterGu(
             OutResult.Role = ResolvedRole;
             OutResult.Definition = const_cast<UGuDefinition*>(ExistingAsset);
             OutResult.Summary = ProcGuBuildSummary(OutResult.Definition);
+            ProcGuPopulateStructureResult(OutResult.Definition, OutResult);
             OutResult.bReusedExistingSpecies = true;
             OutError.Reset();
             return true;
@@ -1065,6 +1607,7 @@ bool UGuProceduralGeneratorSubsystem::GenerateAndRegisterGu(
     OutResult.Role = ResolvedRole;
     OutResult.Definition = CanonicalAsset ? const_cast<UGuDefinition*>(CanonicalAsset) : Definition;
     OutResult.Summary = ProcGuBuildSummary(OutResult.Definition);
+    ProcGuPopulateStructureResult(OutResult.Definition, OutResult);
     OutResult.bReusedExistingSpecies = bAlreadyRegistered;
     OutError.Reset();
 
@@ -1147,6 +1690,51 @@ bool UGuProceduralGeneratorSubsystem::GenerateAndGrantGu(
     return true;
 }
 
+bool UGuProceduralGeneratorSubsystem::GenerateSpeciesBatch(
+    const FProceduralGuGenerationRequest& BaseRequest,
+    const int32 Count,
+    const int32 BatchSeed,
+    TArray<FProceduralGuGenerationResult>& OutResults,
+    FString& OutError)
+{
+    OutResults.Reset();
+    const int32 TargetCount = FMath::Clamp(Count, 1, 5000);
+    const int32 EffectiveBatchSeed = BatchSeed != 0 ? BatchSeed : FMath::RandRange(1, MAX_int32);
+    TSet<FName> SeenDefinitions;
+
+    const int32 MaxAttempts = TargetCount * 12;
+    for (int32 Attempt = 0; Attempt < MaxAttempts && OutResults.Num() < TargetCount; ++Attempt)
+    {
+        FProceduralGuGenerationRequest Request = BaseRequest;
+        Request.Seed = ProcGuSubSeed(EffectiveBatchSeed, *FString::Printf(TEXT("batch-species-%d"), Attempt));
+
+        FProceduralGuGenerationResult Result;
+        FString GenerateError;
+        if (!GenerateAndRegisterGu(Request, Result, GenerateError))
+        {
+            OutError = FString::Printf(TEXT("Batch generation failed at attempt %d: %s"), Attempt, *GenerateError);
+            return false;
+        }
+
+        if (Result.DefinitionId.IsNone() || SeenDefinitions.Contains(Result.DefinitionId)) continue;
+        SeenDefinitions.Add(Result.DefinitionId);
+        OutResults.Add(MoveTemp(Result));
+    }
+
+    if (OutResults.Num() != TargetCount)
+    {
+        OutError = FString::Printf(
+            TEXT("Requested %d distinct procedural species but only %d unique canonical species were produced after %d deterministic attempts."),
+            TargetCount,
+            OutResults.Num(),
+            MaxAttempts);
+        return false;
+    }
+
+    OutError.Reset();
+    return true;
+}
+
 bool UGuProceduralGeneratorSubsystem::BuildDefinitionFromRuntimeRecord(
     const FGuDefinitionRecord& SourceRecord,
     UGuDefinition*& OutDefinition,
@@ -1214,9 +1802,50 @@ bool UGuProceduralGeneratorSubsystem::BuildDefinitionFromRuntimeRecord(
     Definition->RefinementAssistance = SourceRecord.RefinementAssistance;
     Definition->Appearance = SourceRecord.Appearance;
 
+    auto HasCompilerTag = [&SourceRecord](const TCHAR* Wanted)
+    {
+        for (const FName Tag : SourceRecord.Tags)
+        {
+            if (Tag.ToString().Equals(Wanted, ESearchCase::IgnoreCase)) return true;
+        }
+        return false;
+    };
+
+    const bool bProceduralV2 = HasCompilerTag(TEXT("generator:v2"));
+    const bool bSemanticCompilerV2 = HasCompilerTag(TEXT("compiler:semantic-v2"));
+
+    FProcGuPathAffinity Affinity = ProcGuCombinedAffinity(Definition->Path, Definition->SecondaryPaths);
+    if (bSemanticCompilerV2) ProcGuApplySemanticAffinity(Affinity, SourceRecord.RefinementProfile);
+
     FRandomStream MechanicsRandom(ProcGuSubSeed(Request.Seed, TEXT("mechanics")));
-    const FProcGuPathAffinity Affinity = ProcGuCombinedAffinity(Definition->Path, Definition->SecondaryPaths);
     ProcGuBuildMechanicComposition(Definition, GetGameInstance()->GetSubsystem<UGuDefinitionRegistrySubsystem>(), Affinity, Request.Role, Definition->Rank, Request.Complexity, MechanicsRandom);
+
+    if (bProceduralV2 || bSemanticCompilerV2)
+    {
+        FRandomStream DiversityRandom(ProcGuSubSeed(Request.Seed, TEXT("diversity-v2")));
+        ProcGuApplyStructuralDiversity(
+            Definition,
+            Affinity,
+            bSemanticCompilerV2 ? &SourceRecord.RefinementProfile : nullptr,
+            Request.Role,
+            Definition->Rank,
+            Request.Complexity,
+            DiversityRandom);
+    }
+
+    // Runtime/refinement records own their agreed activation cost. The generated typed
+    // mechanic must match that persisted contract instead of silently rerolling it.
+    if (SourceRecord.EssenceCost >= 0.0f)
+    {
+        for (TInstancedStruct<FGuMechanic>& Entry : Definition->Mechanics)
+        {
+            if (FGuEssenceCostMechanic* Cost = Entry.GetMutablePtr<FGuEssenceCostMechanic>())
+            {
+                Cost->Cost = SourceRecord.EssenceCost;
+                break;
+            }
+        }
+    }
 
     // Preserve a refinement-specific assistant exactly when the outcome record already authored one.
     if (SourceRecord.RefinementAssistance.bEnabled && !ProcGuHasMechanicStruct(Definition, FGuRefinementAssistMechanic::StaticStruct()))

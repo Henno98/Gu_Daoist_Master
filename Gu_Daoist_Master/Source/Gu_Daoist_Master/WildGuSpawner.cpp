@@ -146,6 +146,17 @@ bool AWildGuSpawner::PrepareDefinition(FName& OutDefinitionId, FString& OutError
             return false;
         }
 
+        // RegisterDefinitionAsset can canonicalize an implicit object-name ID to
+        // an existing named species. Re-read the resolved identity after registration.
+        if (const FGuDefinitionRecord* Canonical = Registry->FindDefinition(UGuDefinitionRegistrySubsystem::DefinitionIdForAsset(GuDefinition)))
+        {
+            OutDefinitionId = Canonical->Id;
+        }
+        else
+        {
+            OutDefinitionId = UGuDefinitionRegistrySubsystem::DefinitionIdForAsset(GuDefinition);
+        }
+
         OutError.Reset();
         return true;
     }

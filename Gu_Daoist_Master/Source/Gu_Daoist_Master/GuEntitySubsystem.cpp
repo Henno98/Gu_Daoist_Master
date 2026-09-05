@@ -195,6 +195,27 @@ bool UGuEntitySubsystem::SetEntityOwnershipAndContainer(
         return false;
     }
 
+    if (GuInstances.Contains(EntityId))
+    {
+        const FGuWillComponent* Will = GuWills.Find(EntityId);
+        if (Container == EGuContainer::Captured)
+        {
+            OutError = TEXT("Gu may enter Captured only through the physical wild-Gu capture path.");
+            return false;
+        }
+        if (Will && Will->State == EGuWillState::Wild &&
+            (Container != EGuContainer::World || !OwnerId.IsEmpty()))
+        {
+            OutError = TEXT("A wild Gu must be physically captured before ownership/container transfer.");
+            return false;
+        }
+        if (Will && (Will->State == EGuWillState::Captured || Will->State == EGuWillState::Refining))
+        {
+            OutError = TEXT("A captured Gu cannot leave physical custody until its wild will is refined.");
+            return false;
+        }
+    }
+
     FOwnedByComponent Owner;
     Owner.OwnerId = OwnerId;
     Owners.Add(EntityId, MoveTemp(Owner));
@@ -433,6 +454,48 @@ bool UGuEntitySubsystem::CreateGuInstanceWithId(
     Placement.Container = Container;
     GuPlacements.Add(OutEntityId, Placement);
 
+    FGuWillComponent InitialWill;
+    if (Container == EGuContainer::World && OwnerId.IsEmpty())
+    {
+        InitialWill.State = EGuWillState::Wild;
+        InitialWill.RefinementProgress = 0.0f;
+        InitialWill.MasterId.Reset();
+        InitialWill.CaptorId.Reset();
+
+        if (FGuStatusComponent* ExistingStatus = GuStatus.Find(OutEntityId))
+        {
+            ExistingStatus->States.Remove(TEXT("Refined / owned"));
+            ExistingStatus->States.AddUnique(TEXT("Wild"));
+            ExistingStatus->HolderId.Reset();
+            ExistingStatus->Visibility = TEXT("Public");
+        }
+    }
+    else if (Container == EGuContainer::Captured)
+    {
+        InitialWill.State = EGuWillState::Captured;
+        InitialWill.RefinementProgress = 0.0f;
+        InitialWill.CaptorId = OwnerId;
+        InitialWill.MasterId.Reset();
+        InitialWill.CapturedAtUnixMs = NowUnixMs();
+
+        if (FGuStatusComponent* ExistingStatus = GuStatus.Find(OutEntityId))
+        {
+            ExistingStatus->States.Remove(TEXT("Refined / owned"));
+            ExistingStatus->States.AddUnique(TEXT("Captured"));
+            ExistingStatus->States.AddUnique(TEXT("Unrefined will"));
+            ExistingStatus->HolderId = OwnerId;
+            ExistingStatus->Visibility = TEXT("Secret");
+        }
+    }
+    else
+    {
+        InitialWill.State = EGuWillState::Refined;
+        InitialWill.RefinementProgress = 100.0f;
+        InitialWill.CaptorId = OwnerId;
+        InitialWill.MasterId = OwnerId;
+    }
+    GuWills.Add(OutEntityId, MoveTemp(InitialWill));
+
     AttachRefinementSemantics(
         OutEntityId,
         Definition->RefinementProfile,
@@ -477,6 +540,7 @@ bool UGuEntitySubsystem::DestroyEntity(const FGuid EntityId)
     GuStatus.Remove(EntityId);
     GuLifecycles.Remove(EntityId);
     GuCharges.Remove(EntityId);
+    GuWills.Remove(EntityId);
     GuPlacements.Remove(EntityId);
     EnslavementControllers.Remove(EntityId);
     MultitaskingBoosts.Remove(EntityId);
@@ -543,9 +607,21 @@ bool UGuEntitySubsystem::FindOwnedGuInstance(
     FGuid& OutEntityId,
     const bool bLivingOnly) const
 {
+    FName CanonicalDefinitionId = DefinitionId;
+    if (const UGameInstance* GI = GetGameInstance())
+    {
+        if (const UGuDefinitionRegistrySubsystem* Registry = GI->GetSubsystem<UGuDefinitionRegistrySubsystem>())
+        {
+            if (const FGuDefinitionRecord* Definition = Registry->FindDefinition(DefinitionId))
+            {
+                CanonicalDefinitionId = Definition->Id;
+            }
+        }
+    }
+
     for (const TPair<FGuid, FGuInstanceComponent>& Pair : GuInstances)
     {
-        if (Pair.Value.DefinitionId != DefinitionId) continue;
+        if (Pair.Value.DefinitionId != CanonicalDefinitionId) continue;
         const FOwnedByComponent* Owner = Owners.Find(Pair.Key);
         const FGuPlacementComponent* Placement = GuPlacements.Find(Pair.Key);
         const FGuConditionComponent* Condition = GuConditions.Find(Pair.Key);
@@ -556,6 +632,273 @@ bool UGuEntitySubsystem::FindOwnedGuInstance(
     }
     OutEntityId.Invalidate();
     return false;
+}
+
+bool UGuEntitySubsystem::GetGuWillSnapshot(const FGuid EntityId, FGuWillComponent& OutWill) const
+{
+    if (!GuInstances.Contains(EntityId)) return false;
+
+    if (const FGuWillComponent* Will = GuWills.Find(EntityId))
+    {
+        OutWill = *Will;
+        return true;
+    }
+
+    // Compatibility view for pre-v3 Gu that have not yet been resaved.
+    OutWill = FGuWillComponent();
+    const FOwnedByComponent* Owner = Owners.Find(EntityId);
+    const FGuPlacementComponent* Placement = GuPlacements.Find(EntityId);
+    if (Placement && Placement->Container == EGuContainer::World && (!Owner || Owner->OwnerId.IsEmpty()))
+    {
+        OutWill.State = EGuWillState::Wild;
+        OutWill.RefinementProgress = 0.0f;
+        OutWill.MasterId.Reset();
+        OutWill.CaptorId.Reset();
+    }
+    else
+    {
+        OutWill.State = EGuWillState::Refined;
+        OutWill.RefinementProgress = 100.0f;
+        OutWill.MasterId = Owner ? Owner->OwnerId : FString();
+        OutWill.CaptorId = OutWill.MasterId;
+    }
+    return true;
+}
+
+TArray<FGuid> UGuEntitySubsystem::QueryCapturedGuForOwner(const FString& OwnerId) const
+{
+    TArray<FGuid> Result;
+    for (const TPair<FGuid, FGuInstanceComponent>& Pair : GuInstances)
+    {
+        const FOwnedByComponent* Owner = Owners.Find(Pair.Key);
+        const FGuPlacementComponent* Placement = GuPlacements.Find(Pair.Key);
+        const FGuConditionComponent* Condition = GuConditions.Find(Pair.Key);
+        const FGuWillComponent* Will = GuWills.Find(Pair.Key);
+        if (!Owner || !Placement || Owner->OwnerId != OwnerId) continue;
+        if (Placement->Container != EGuContainer::Captured) continue;
+        if (!Condition || !Condition->bAlive) continue;
+        if (Will && Will->State == EGuWillState::Refined) continue;
+        Result.Add(Pair.Key);
+    }
+    return Result;
+}
+
+bool UGuEntitySubsystem::MarkGuCaptured(
+    const FGuid EntityId,
+    const FString& CaptorId,
+    FString& OutError)
+{
+    if (!HasDomainAuthority())
+    {
+        OutError = TEXT("Wild Gu capture is server-authoritative.");
+        return false;
+    }
+    if (CaptorId.IsEmpty())
+    {
+        OutError = TEXT("A persistent captor id is required.");
+        return false;
+    }
+
+    FGuInstanceComponent* Instance = GuInstances.Find(EntityId);
+    FGuConditionComponent* Condition = GuConditions.Find(EntityId);
+    FOwnedByComponent* Owner = Owners.Find(EntityId);
+    FGuPlacementComponent* Placement = GuPlacements.Find(EntityId);
+    if (!Instance || !Condition || !Condition->bAlive || !Owner || !Placement)
+    {
+        OutError = TEXT("The target is not a living physical Gu.");
+        return false;
+    }
+    if (Placement->Container != EGuContainer::World)
+    {
+        OutError = TEXT("Only a Gu physically present in the world can be captured.");
+        return false;
+    }
+    if (!Owner->OwnerId.IsEmpty())
+    {
+        OutError = TEXT("The target Gu already has a physical holder.");
+        return false;
+    }
+
+    FGuWillComponent& Will = GuWills.FindOrAdd(EntityId);
+    if (Will.State == EGuWillState::Refined && !Will.MasterId.IsEmpty())
+    {
+        OutError = TEXT("A refined Gu cannot be treated as a wild capture without first resolving its existing master will.");
+        return false;
+    }
+
+    Owner->OwnerId = CaptorId;
+    Placement->Container = EGuContainer::Captured;
+
+    Will.State = EGuWillState::Captured;
+    Will.CaptorId = CaptorId;
+    Will.MasterId.Reset();
+    Will.RefinementProgress = 0.0f;
+    Will.Resistance = FMath::Max(0.0f, Will.Resistance);
+    if (Will.Resistance <= KINDA_SMALL_NUMBER) Will.Resistance = 1.0f;
+    Will.CapturedAtUnixMs = NowUnixMs();
+
+    FGuStatusComponent& Status = GuStatus.FindOrAdd(EntityId);
+    Status.HolderId = CaptorId;
+    Status.States.Remove(TEXT("Wild"));
+    Status.States.Remove(TEXT("Refined / owned"));
+    Status.States.Remove(TEXT("Will refining"));
+    Status.States.AddUnique(TEXT("Captured"));
+    Status.States.AddUnique(TEXT("Unrefined will"));
+    Status.States.AddUnique(TEXT("Active"));
+    Status.Visibility = TEXT("Secret");
+
+    RequestPersistentSave();
+    OutError.Reset();
+    return true;
+}
+
+bool UGuEntitySubsystem::BeginGuWillRefinement(
+    const FGuid EntityId,
+    const FString& RefinerId,
+    FString& OutError)
+{
+    if (!HasDomainAuthority())
+    {
+        OutError = TEXT("Gu will refinement is server-authoritative.");
+        return false;
+    }
+
+    FGuWillComponent* Will = GuWills.Find(EntityId);
+    const FOwnedByComponent* Owner = Owners.Find(EntityId);
+    const FGuPlacementComponent* Placement = GuPlacements.Find(EntityId);
+    const FGuConditionComponent* Condition = GuConditions.Find(EntityId);
+    if (!Will || !Owner || !Placement || !Condition || !Condition->bAlive)
+    {
+        OutError = TEXT("The captured Gu has incomplete physical/will state.");
+        return false;
+    }
+    if (Owner->OwnerId != RefinerId || Will->CaptorId != RefinerId)
+    {
+        OutError = TEXT("Only the current physical captor can refine this wild Gu's will.");
+        return false;
+    }
+    if (Placement->Container != EGuContainer::Captured)
+    {
+        OutError = TEXT("The Gu must remain physically restrained while its will is refined.");
+        return false;
+    }
+    if (Will->State != EGuWillState::Captured && Will->State != EGuWillState::Refining)
+    {
+        OutError = TEXT("This Gu is not waiting for will refinement.");
+        return false;
+    }
+
+    Will->State = EGuWillState::Refining;
+    if (FGuStatusComponent* Status = GuStatus.Find(EntityId))
+    {
+        Status->States.AddUnique(TEXT("Will refining"));
+    }
+    RequestPersistentSave();
+    OutError.Reset();
+    return true;
+}
+
+bool UGuEntitySubsystem::AdvanceGuWillRefinement(
+    const FGuid EntityId,
+    const FString& RefinerId,
+    const float ProgressDelta,
+    FString& OutError)
+{
+    if (!HasDomainAuthority())
+    {
+        OutError = TEXT("Gu will refinement is server-authoritative.");
+        return false;
+    }
+    if (!FMath::IsFinite(ProgressDelta) || ProgressDelta < 0.0f)
+    {
+        OutError = TEXT("Will-refinement progress must be finite and non-negative.");
+        return false;
+    }
+
+    FGuWillComponent* Will = GuWills.Find(EntityId);
+    const FOwnedByComponent* Owner = Owners.Find(EntityId);
+    const FGuPlacementComponent* Placement = GuPlacements.Find(EntityId);
+    if (!Will || !Owner || !Placement || Owner->OwnerId != RefinerId || Will->CaptorId != RefinerId)
+    {
+        OutError = TEXT("The refiner no longer has physical custody of this Gu.");
+        return false;
+    }
+    if (Will->State != EGuWillState::Refining || Placement->Container != EGuContainer::Captured)
+    {
+        OutError = TEXT("Begin will refinement before applying progress.");
+        return false;
+    }
+
+    Will->RefinementProgress = FMath::Clamp(Will->RefinementProgress + ProgressDelta, 0.0f, 100.0f);
+    RequestPersistentSave();
+    OutError.Reset();
+    return true;
+}
+
+bool UGuEntitySubsystem::CompleteGuWillRefinement(
+    const FGuid EntityId,
+    const FString& RefinerId,
+    const EGuContainer TargetContainer,
+    FString& OutError)
+{
+    if (!HasDomainAuthority())
+    {
+        OutError = TEXT("Gu will refinement is server-authoritative.");
+        return false;
+    }
+    if (TargetContainer != EGuContainer::Aperture &&
+        TargetContainer != EGuContainer::Storage &&
+        TargetContainer != EGuContainer::House)
+    {
+        OutError = TEXT("A refined Gu must enter Aperture, Storage, or House.");
+        return false;
+    }
+
+    FGuWillComponent* Will = GuWills.Find(EntityId);
+    FOwnedByComponent* Owner = Owners.Find(EntityId);
+    FGuPlacementComponent* Placement = GuPlacements.Find(EntityId);
+    FGuConditionComponent* Condition = GuConditions.Find(EntityId);
+    if (!Will || !Owner || !Placement || !Condition || !Condition->bAlive)
+    {
+        OutError = TEXT("The captured Gu has incomplete physical/will state.");
+        return false;
+    }
+    if (Owner->OwnerId != RefinerId || Will->CaptorId != RefinerId)
+    {
+        OutError = TEXT("Only the current captor can complete this will refinement.");
+        return false;
+    }
+    if (Will->State != EGuWillState::Refining || Placement->Container != EGuContainer::Captured)
+    {
+        OutError = TEXT("The Gu is not in an active captured-will refinement.");
+        return false;
+    }
+    if (Will->RefinementProgress + KINDA_SMALL_NUMBER < 100.0f)
+    {
+        OutError = FString::Printf(
+            TEXT("The wild will is only %.1f%% refined."),
+            Will->RefinementProgress);
+        return false;
+    }
+
+    Will->State = EGuWillState::Refined;
+    Will->MasterId = RefinerId;
+    Will->RefinementProgress = 100.0f;
+    Placement->Container = TargetContainer;
+
+    FGuStatusComponent& Status = GuStatus.FindOrAdd(EntityId);
+    Status.HolderId = RefinerId;
+    Status.States.Remove(TEXT("Captured"));
+    Status.States.Remove(TEXT("Unrefined will"));
+    Status.States.Remove(TEXT("Will refining"));
+    Status.States.Remove(TEXT("Wild"));
+    Status.States.AddUnique(TEXT("Refined / owned"));
+    Status.States.AddUnique(TEXT("Active"));
+    Status.Visibility = TEXT("Secret");
+
+    RequestPersistentSave();
+    OutError.Reset();
+    return true;
 }
 
 bool UGuEntitySubsystem::CanUseGu(const FGuid EntityId, FString& OutError) const
@@ -574,6 +917,16 @@ bool UGuEntitySubsystem::CanUseGu(const FGuid EntityId, FString& OutError) const
     if (!Condition->bAlive || Placement->Container == EGuContainer::Consumed)
     {
         OutError = TEXT("That Gu no longer exists in a usable state.");
+        return false;
+    }
+    if (Placement->Container == EGuContainer::Captured)
+    {
+        OutError = TEXT("That Gu is physically captured but its wild will has not been refined.");
+        return false;
+    }
+    if (const FGuWillComponent* Will = GuWills.Find(EntityId); Will && Will->State != EGuWillState::Refined)
+    {
+        OutError = TEXT("That Gu's will is not refined and it cannot be activated.");
         return false;
     }
     if (Lifecycle && Lifecycle->bConsumable && (!Charges || Charges->Remaining <= 0))
@@ -717,6 +1070,7 @@ TArray<FGuEntitySnapshot> UGuEntitySubsystem::ExportSnapshots() const
             if (const FGuLifecycleComponent* C = GuLifecycles.Find(EntityId)) S.GuLifecycle = *C;
             if (const FGuChargesComponent* C = GuCharges.Find(EntityId)) S.GuCharges = *C;
             if (const FGuPlacementComponent* C = GuPlacements.Find(EntityId)) S.GuPlacement = *C;
+            if (const FGuWillComponent* C = GuWills.Find(EntityId)) { S.bHasGuWill = true; S.GuWill = *C; }
         }
         if (const FGuEnslavementControllerComponent* Found = EnslavementControllers.Find(EntityId)) { S.bHasEnslavementController = true; S.EnslavementController = *Found; }
         if (const FMultitaskingBoostComponent* Found = MultitaskingBoosts.Find(EntityId)) { S.bHasMultitaskingBoost = true; S.MultitaskingBoost = *Found; }
@@ -784,6 +1138,36 @@ bool UGuEntitySubsystem::RestoreSnapshots(const TArray<FGuEntitySnapshot>& Snaps
             GuLifecycles.Add(S.EntityId, S.GuLifecycle);
             GuCharges.Add(S.EntityId, S.GuCharges);
             GuPlacements.Add(S.EntityId, S.GuPlacement);
+
+            if (S.bHasGuWill)
+            {
+                GuWills.Add(S.EntityId, S.GuWill);
+            }
+            else
+            {
+                // v1/v2 migration: old saves had no explicit will component.
+                // Unowned World Gu become Wild; every other legacy Gu stays refined/usable.
+                FGuWillComponent MigratedWill;
+                const FOwnedByComponent* RestoredOwner = Owners.Find(S.EntityId);
+                const FGuPlacementComponent* RestoredPlacement = GuPlacements.Find(S.EntityId);
+                if (RestoredPlacement &&
+                    RestoredPlacement->Container == EGuContainer::World &&
+                    (!RestoredOwner || RestoredOwner->OwnerId.IsEmpty()))
+                {
+                    MigratedWill.State = EGuWillState::Wild;
+                    MigratedWill.RefinementProgress = 0.0f;
+                    MigratedWill.MasterId.Reset();
+                    MigratedWill.CaptorId.Reset();
+                }
+                else
+                {
+                    MigratedWill.State = EGuWillState::Refined;
+                    MigratedWill.RefinementProgress = 100.0f;
+                    MigratedWill.MasterId = RestoredOwner ? RestoredOwner->OwnerId : FString();
+                    MigratedWill.CaptorId = MigratedWill.MasterId;
+                }
+                GuWills.Add(S.EntityId, MoveTemp(MigratedWill));
+            }
         }
         if (S.bHasEnslavementController) EnslavementControllers.Add(S.EntityId, S.EnslavementController);
         if (S.bHasMultitaskingBoost) MultitaskingBoosts.Add(S.EntityId, S.MultitaskingBoost);
@@ -812,6 +1196,7 @@ void UGuEntitySubsystem::ResetAllEntities()
     GuStatus.Reset();
     GuLifecycles.Reset();
     GuCharges.Reset();
+    GuWills.Reset();
     GuPlacements.Reset();
     EnslavementControllers.Reset();
     MultitaskingBoosts.Reset();
@@ -848,6 +1233,25 @@ bool UGuEntitySubsystem::TransferGuOwnershipAndPlacement(
         OutError = TEXT("Transfer cannot place a living Gu directly into Consumed.");
         return false;
     }
+    if (NewContainer == EGuContainer::Captured)
+    {
+        OutError = TEXT("Gu may enter Captured only through MarkGuCaptured.");
+        return false;
+    }
+    if (const FGuWillComponent* Will = GuWills.Find(EntityId))
+    {
+        if (Will->State == EGuWillState::Wild &&
+            (NewContainer != EGuContainer::World || !NewOwnerId.IsEmpty()))
+        {
+            OutError = TEXT("A wild Gu must be physically captured before ownership transfer.");
+            return false;
+        }
+        if (Will->State == EGuWillState::Captured || Will->State == EGuWillState::Refining)
+        {
+            OutError = TEXT("A captured Gu cannot be transferred out of custody until its wild will is refined.");
+            return false;
+        }
+    }
 
     FOwnedByComponent& Owner = Owners.FindOrAdd(EntityId);
     FGuPlacementComponent& Placement = GuPlacements.FindOrAdd(EntityId);
@@ -872,6 +1276,7 @@ bool UGuEntitySubsystem::TransferGuOwnershipAndPlacement(
     }
     Status.States.AddUnique(TEXT("Active"));
 
+    RequestPersistentSave();
     OutError.Reset();
     return true;
 }

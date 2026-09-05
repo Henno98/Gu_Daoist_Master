@@ -85,7 +85,7 @@ bool UGuPersistenceSubsystem::EnsureLoaded(FString& OutError)
         return false;
     }
 
-    if (Save->SaveVersion > 2)
+    if (Save->SaveVersion > 3)
     {
         bIsLoading = false;
         OutError = FString::Printf(TEXT("Gu-domain save version %d is newer than this build supports."), Save->SaveVersion);
@@ -142,6 +142,37 @@ bool UGuPersistenceSubsystem::EnsureLoaded(FString& OutError)
     }
 
     TArray<FGuEntitySnapshot> Snapshots = Save->EntitySnapshots;
+    bool bDefinitionIdentityMigrated = false;
+
+    // Resolve old DataAsset object-name IDs through the current registry aliases.
+    // This repairs saves from the window where a display-name collision could make
+    // one species alternate between its canonical ID and its asset object name.
+    for (FGuEntitySnapshot& Snapshot : Snapshots)
+    {
+        if (Snapshot.bHasGuInstance)
+        {
+            if (const FGuDefinitionRecord* Canonical = Registry->FindDefinition(Snapshot.GuInstance.DefinitionId))
+            {
+                if (Snapshot.GuInstance.DefinitionId != Canonical->Id)
+                {
+                    Snapshot.GuInstance.DefinitionId = Canonical->Id;
+                    bDefinitionIdentityMigrated = true;
+                }
+            }
+        }
+        if (Snapshot.bHasRefinable && !Snapshot.Refinable.DefinitionId.IsNone())
+        {
+            if (const FGuDefinitionRecord* Canonical = Registry->FindDefinition(Snapshot.Refinable.DefinitionId))
+            {
+                if (Snapshot.Refinable.DefinitionId != Canonical->Id)
+                {
+                    Snapshot.Refinable.DefinitionId = Canonical->Id;
+                    bDefinitionIdentityMigrated = true;
+                }
+            }
+        }
+    }
+
     if (!DefinitionRemap.IsEmpty())
     {
         for (FGuEntitySnapshot& Snapshot : Snapshots)
@@ -176,9 +207,10 @@ bool UGuPersistenceSubsystem::EnsureLoaded(FString& OutError)
         return false;
     }
 
+    const bool bNeedsSchemaUpgrade = Save->SaveVersion < 3;
     bIsLoading = false;
     bLoaded = true;
-    bDirty = !DefinitionRemap.IsEmpty();
+    bDirty = bNeedsSchemaUpgrade || bDefinitionIdentityMigrated || !DefinitionRemap.IsEmpty();
     OutError.Reset();
 
     UE_LOG(
@@ -228,7 +260,7 @@ bool UGuPersistenceSubsystem::SaveNow(FString& OutError)
         return false;
     }
 
-    Save->SaveVersion = 2;
+    Save->SaveVersion = 3;
     Save->RuntimeDefinitions = Registry->GetRuntimeDefinitions();
     Save->EntitySnapshots = Entities->ExportSnapshots();
     Save->SavedAtUnixMs = FDateTime::UtcNow().ToUnixTimestamp() * 1000ll;

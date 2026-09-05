@@ -116,6 +116,12 @@ struct FGuWorldCaptureResult
     bool bApertureRuptured = false;
 
     UPROPERTY(BlueprintReadOnly, Category="Gu|World|Population")
+    bool bRequiresWillRefinement = false;
+
+    UPROPERTY(BlueprintReadOnly, Category="Gu|World|Population")
+    EGuContainer CapturedContainer = EGuContainer::World;
+
+    UPROPERTY(BlueprintReadOnly, Category="Gu|World|Population")
     FGuid EntityId;
 
     UPROPERTY(BlueprintReadOnly, Category="Gu|World|Population")

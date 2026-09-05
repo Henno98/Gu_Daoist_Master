@@ -1482,11 +1482,44 @@ FGuDefinitionRecord URefinementSubsystem::BuildExperimentalDefinition(const FRef
     Definition.bCustom=true;
 
     const FString StrongestAttribute = Analysis.SurvivingAttributes.IsEmpty()?TEXT(""):RefinementAttributeWord(Analysis.SurvivingAttributes[0]);
+    const FString SecondaryAttribute = Analysis.SurvivingAttributes.Num()>1?RefinementAttributeWord(Analysis.SurvivingAttributes[1]):TEXT("");
     const FString PathWord = Analysis.PrimaryPath.IsNone()?TEXT("Nameless"):Analysis.PrimaryPath.ToString();
     const FString Noun=RefinementTemplateNoun(Template);
-    FString BaseName = FString::Printf(TEXT("%s %s Gu"),StrongestAttribute.IsEmpty()?*PathWord:*StrongestAttribute,StrongestAttribute.IsEmpty()&&PathWord.Equals(Noun,ESearchCase::IgnoreCase)?TEXT("Essence"):*Noun);
+    const uint32 NamePattern = FCrc::StrCrc32(*FString::Printf(TEXT("name|%s"),*Signature)) % 5u;
+    FString BaseName;
+    if(StrongestAttribute.IsEmpty())
+    {
+        BaseName=FString::Printf(TEXT("%s %s Gu"),*PathWord,PathWord.Equals(Noun,ESearchCase::IgnoreCase)?TEXT("Essence"):*Noun);
+    }
+    else if(NamePattern==0u)
+    {
+        BaseName=FString::Printf(TEXT("%s %s Gu"),*StrongestAttribute,*Noun);
+    }
+    else if(NamePattern==1u)
+    {
+        BaseName=FString::Printf(TEXT("%s %s Gu"),*PathWord,*Noun);
+    }
+    else if(NamePattern==2u)
+    {
+        BaseName=FString::Printf(TEXT("%s %s %s Gu"),*StrongestAttribute,*PathWord,*Noun);
+    }
+    else if(NamePattern==3u && !SecondaryAttribute.IsEmpty())
+    {
+        BaseName=FString::Printf(TEXT("%s %s %s Gu"),*StrongestAttribute,*SecondaryAttribute,*Noun);
+    }
+    else
+    {
+        BaseName=FString::Printf(TEXT("%s %s %s Gu"),*PathWord,*StrongestAttribute,*Noun);
+    }
     BaseName.ReplaceInline(TEXT("  "),TEXT(" "));
-    if (Registry && Registry->HasDefinition(FName(*BaseName))) BaseName=FString::Printf(TEXT("%s %s Gu"),*BaseName.Replace(TEXT(" Gu"),TEXT("")),*Signature.Left(4).ToUpper());
+    if (Registry && Registry->HasDefinition(FName(*BaseName)))
+    {
+        const FString ExtraWord=!SecondaryAttribute.IsEmpty()?SecondaryAttribute:PathWord;
+        const FString Expanded=FString::Printf(TEXT("%s %s Gu"),*BaseName.Replace(TEXT(" Gu"),TEXT("")),*ExtraWord);
+        BaseName=Registry->HasDefinition(FName(*Expanded))
+            ? FString::Printf(TEXT("%s %s Gu"),*BaseName.Replace(TEXT(" Gu"),TEXT("")),*Signature.Left(4).ToUpper())
+            : Expanded;
+    }
     Definition.Name=BaseName.Left(80);
 
     static const TMap<FName,FName> Categories = {
@@ -1580,7 +1613,15 @@ FGuDefinitionRecord URefinementSubsystem::BuildExperimentalDefinition(const FRef
         }
     }
     Definition.Appearance.Seed=static_cast<int32>(FCrc::StrCrc32(*Signature));
-    Definition.Tags={TEXT("experimental-refinement")};
+    const int32 SemanticComplexity = FMath::Clamp(
+        1 + (Analysis.SurvivingAttributes.Num() + Analysis.SurvivingTraits.Num()) / 3,
+        1,
+        5);
+    Definition.Tags={
+        TEXT("experimental-refinement"),
+        TEXT("compiler:semantic-v2"),
+        FName(*FString::Printf(TEXT("complexity:%d"), SemanticComplexity))
+    };
     for(const FName Attr : Analysis.SurvivingAttributes)Definition.Tags.Add(Attr);
     for(const FName Trait : Analysis.SurvivingTraits)Definition.Tags.Add(FName(*FString::Printf(TEXT("trait:%s"),*Trait.ToString())));
     Definition.Source=FString::Printf(TEXT("Experimental refinement profile v%d"),Analysis.ProfileVersion);

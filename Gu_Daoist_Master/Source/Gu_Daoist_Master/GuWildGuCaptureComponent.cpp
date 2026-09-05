@@ -6,6 +6,7 @@
 #include "GuEcologyPopulationSubsystem.h"
 #include "GuEntitySubsystem.h"
 #include "GuPlayerState.h"
+#include "Gu_Daoist_MasterCharacter.h"
 #include "WildGuWorldActor.h"
 
 UGuWildGuCaptureComponent::UGuWildGuCaptureComponent()
@@ -294,6 +295,37 @@ bool UGuWildGuCaptureComponent::ExecuteInstantRefineOnAuthority(
     {
         return false;
     }
+
+    // ECS ownership/will state is now authoritative. If refinement placed the Gu directly
+    // into the aperture, immediately bridge that same physical FGuid into GAS and rebuild
+    // the owner's active-Gu projection. Previously this only happened on possession/load.
+    if (TargetContainer == EGuContainer::Aperture)
+    {
+        AGu_Daoist_MasterCharacter* Character = Cast<AGu_Daoist_MasterCharacter>(GetOwner());
+        if (!Character)
+        {
+            OutError = TEXT("Will refinement completed, but the capture component owner is not a Gu Daoist character, so the new aperture Gu could not be bound to GAS.");
+            UE_LOG(LogTemp, Error, TEXT("%s Entity=%s"), *OutError, *EntityId.ToString());
+            return false;
+        }
+
+        FString SyncError;
+        if (!Character->SynchronizeOwnedApertureGu(EntityId, SyncError))
+        {
+            OutError = FString::Printf(
+                TEXT("Will refinement completed, but runtime aperture binding failed: %s"),
+                *SyncError);
+            UE_LOG(LogTemp, Error, TEXT("%s Entity=%s"), *OutError, *EntityId.ToString());
+            return false;
+        }
+    }
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Wild Gu will refined: entity %s -> %s."),
+        *EntityId.ToString(),
+        *UEnum::GetValueAsString(TargetContainer));
 
     ClientWillRefinementSucceeded(EntityId);
     OutError.Reset();

@@ -12,6 +12,30 @@
 #include "Gu_Projectile.h"
 #include "UGuDefinition.h"
 
+namespace
+{
+    FString BuildGuMechanicDebugList(const UGuDefinition* Definition)
+    {
+        if (!Definition) return TEXT("<none>");
+
+        TArray<FString> Names;
+        Names.Reserve(Definition->Mechanics.Num());
+        for (const TInstancedStruct<FGuMechanic>& Entry : Definition->Mechanics)
+        {
+            const UScriptStruct* Struct = Entry.GetScriptStruct();
+            if (!Struct) continue;
+
+            FString Name = Struct->GetName();
+            Name.RemoveFromStart(TEXT("FGu"));
+            Name.RemoveFromStart(TEXT("Gu"));
+            Name.RemoveFromEnd(TEXT("Mechanic"));
+            Names.Add(Name);
+        }
+
+        return Names.IsEmpty() ? TEXT("<none>") : FString::Join(Names, TEXT(", "));
+    }
+}
+
 UGA_GuAbility::UGA_GuAbility()
 {
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
@@ -92,11 +116,13 @@ void UGA_GuAbility::ActivateAbility(
         return;
     }
 
-    bool bExecuted = UGuExecutionLibrary::ExecuteActivation(
+    const bool bDirectActivationExecuted = UGuExecutionLibrary::ExecuteActivation(
         GuDefinition,
         ActorInfo->AbilitySystemComponent.Get(),
         ActorInfo->AvatarActor.Get(),
         GuSystemConfig);
+    bool bExecuted = bDirectActivationExecuted;
+    bool bProjectileCarrierSpawned = false;
 
     // Projectile is an optional carrier, not a requirement for every Gu.
     const FGuProjectileMechanic* ProjectileMechanic = nullptr;
@@ -140,6 +166,7 @@ void UGA_GuAbility::ActivateAbility(
             *ProjectileMechanic,
             GuDefinition,
             ActorInfo->AbilitySystemComponent.Get());
+        bProjectileCarrierSpawned = true;
         bExecuted = true;
     }
 
@@ -171,7 +198,19 @@ void UGA_GuAbility::ActivateAbility(
             }
         }
     }
+#if !UE_BUILD_SHIPPING
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("Activated Gu: %s | Direct=%s ProjectileCarrier=%s Executed=%s Mechanics=[%s]"),
+        *GuDefinition->Name.ToString(),
+        bDirectActivationExecuted ? TEXT("true") : TEXT("false"),
+        bProjectileCarrierSpawned ? TEXT("true") : TEXT("false"),
+        bExecuted ? TEXT("true") : TEXT("false"),
+        *BuildGuMechanicDebugList(GuDefinition));
+#else
     UE_LOG(LogTemp, Warning, TEXT("Activated Gu: %s"), *GuDefinition->Name.ToString());
+#endif
     EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 }
 

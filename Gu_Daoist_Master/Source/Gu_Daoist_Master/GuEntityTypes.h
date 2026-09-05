@@ -227,6 +227,41 @@ struct FGuChargesComponent
     int32 Remaining = 1;
 };
 
+UENUM(BlueprintType)
+enum class EGuWillState : uint8
+{
+    Wild,
+    Captured,
+    Refining,
+    Refined
+};
+
+/** Physical custody and spiritual ownership are deliberately separate. */
+USTRUCT(BlueprintType)
+struct FGuWillComponent
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+    EGuWillState State = EGuWillState::Refined;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+    FString CaptorId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+    FString MasterId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, meta=(ClampMin="0.0", ClampMax="100.0"))
+    float RefinementProgress = 100.0f;
+
+    /** Reserved for rank/species/will-strength tuning. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, meta=(ClampMin="0.0"))
+    float Resistance = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+    int64 CapturedAtUnixMs = 0;
+};
+
 USTRUCT(BlueprintType)
 struct FGuPlacementComponent
 {
@@ -372,6 +407,13 @@ struct FGuEntitySnapshot
     FGuChargesComponent GuCharges;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     FGuPlacementComponent GuPlacement;
+
+    /** Explicit Gu-will state added in physical-domain save v3. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+    bool bHasGuWill = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+    FGuWillComponent GuWill;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     bool bHasEnslavementController = false;

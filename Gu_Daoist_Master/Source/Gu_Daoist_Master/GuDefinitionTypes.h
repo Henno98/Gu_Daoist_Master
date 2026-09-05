@@ -42,13 +42,15 @@ enum class EGuConsumeOn : uint8
 UENUM(BlueprintType)
 enum class EGuContainer : uint8
 {
-    Aperture,
-    Storage,
-    House,
-    World,
-    Consumed
-,
-    Escrow};
+    Aperture = 0,
+    Storage = 1,
+    House = 2,
+    World = 3,
+    Consumed = 4,
+    Escrow = 5,
+    /** Physically restrained wild Gu. Body held, will not yet refined. */
+    Captured = 6
+};
 
 UENUM(BlueprintType)
 enum class ERefinableKind : uint8

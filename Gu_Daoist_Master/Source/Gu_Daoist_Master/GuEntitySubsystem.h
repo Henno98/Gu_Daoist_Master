@@ -79,6 +79,27 @@ public:
     /** Finds one physical Gu instance of this species already owned by the character. */
     bool FindOwnedGuInstance(FName DefinitionId, const FString& OwnerId, EGuContainer Container, FGuid& OutEntityId, bool bLivingOnly = true) const;
 
+    /** Physically restrains a wild Gu. Same FGuid; body captured, will still unrefined. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS|Will")
+    bool MarkGuCaptured(FGuid EntityId, const FString& CaptorId, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS|Will")
+    bool BeginGuWillRefinement(FGuid EntityId, const FString& RefinerId, FString& OutError);
+
+    /** Adds externally-computed progress. The active refinement system will drive this later. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS|Will")
+    bool AdvanceGuWillRefinement(FGuid EntityId, const FString& RefinerId, float ProgressDelta, FString& OutError);
+
+    /** Completes will refinement and moves the SAME FGuid into a normal owned container. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS|Will")
+    bool CompleteGuWillRefinement(FGuid EntityId, const FString& RefinerId, EGuContainer TargetContainer, FString& OutError);
+
+    UFUNCTION(BlueprintCallable, Category="Gu|ECS|Will")
+    bool GetGuWillSnapshot(FGuid EntityId, FGuWillComponent& OutWill) const;
+
+    UFUNCTION(BlueprintPure, Category="Gu|ECS|Will")
+    TArray<FGuid> QueryCapturedGuForOwner(const FString& OwnerId) const;
+
     /** Checks the physical instance state before GAS is allowed to execute it. */
     bool CanUseGu(FGuid EntityId, FString& OutError) const;
 
@@ -98,6 +119,8 @@ public:
     FGuNourishmentComponent* GetMutableGuNourishment(FGuid EntityId) { return GuNourishment.Find(EntityId); }
     const FGuVisualStateComponent* GetGuVisualState(FGuid EntityId) const { return GuVisualStates.Find(EntityId); }
     FGuVisualStateComponent* GetMutableGuVisualState(FGuid EntityId) { return GuVisualStates.Find(EntityId); }
+    const FGuWillComponent* GetGuWill(FGuid EntityId) const { return GuWills.Find(EntityId); }
+    FGuWillComponent* GetMutableGuWill(FGuid EntityId) { return GuWills.Find(EntityId); }
     const FGuPlacementComponent* GetGuPlacement(FGuid EntityId) const { return GuPlacements.Find(EntityId); }
     FGuPlacementComponent* GetMutableGuPlacement(FGuid EntityId) { return GuPlacements.Find(EntityId); }
     /** Generic alias; the underlying placement map keeps its legacy name for source compatibility. */
@@ -156,6 +179,7 @@ private:
     TMap<FGuid, FGuStatusComponent> GuStatus;
     TMap<FGuid, FGuLifecycleComponent> GuLifecycles;
     TMap<FGuid, FGuChargesComponent> GuCharges;
+    TMap<FGuid, FGuWillComponent> GuWills;
     TMap<FGuid, FGuPlacementComponent> GuPlacements;
     TMap<FGuid, FGuEnslavementControllerComponent> EnslavementControllers;
     TMap<FGuid, FMultitaskingBoostComponent> MultitaskingBoosts;

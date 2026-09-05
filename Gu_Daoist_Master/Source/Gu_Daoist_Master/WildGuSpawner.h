@@ -16,9 +16,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 /**
  * Level-authored bridge into the physical wild-Gu simulation.
  *
- * This actor is an authoring/spawn instruction only. Every spawned Gu is a real
- * UGuEntitySubsystem entity, tracked as an ecology resident and projected through
- * AWildGuWorldActor. Destroying this spawner does not destroy the physical Gu.
+ * This actor is only the spawn instruction. Every spawned Gu becomes a real
+ * UGuEntitySubsystem entity, an ecology resident, and an AWildGuWorldActor proxy.
  */
 UCLASS(Blueprintable)
 class GU_DAOIST_MASTER_API AWildGuSpawner : public AActor
@@ -31,75 +30,114 @@ public:
     virtual void PostInitializeComponents() override;
     virtual void BeginPlay() override;
 
-    /** Authored Gu species. Preferred for ordinary level-authored Gu. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
+    // ---------------------------------------------------------------------
+    // Species
+    // ---------------------------------------------------------------------
+
+    /** Gu species to physically spawn. Preferred for authored level content. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Species",
+        meta=(ExposeOnSpawn="true", DisplayName="Gu Definition"))
     TObjectPtr<UGuDefinition> GuDefinition;
 
     /**
-     * Optional registry id for runtime/procedural species. Used only when GuDefinition is null.
-     * The id must already exist in UGuDefinitionRegistrySubsystem when spawning occurs.
+     * Registry ID fallback for procedural/runtime species.
+     * Used only when GuDefinition is null.
      */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Species",
+        meta=(ExposeOnSpawn="true", AdvancedDisplay))
     FName DefinitionId = NAME_None;
 
-    /** Visual/interaction Blueprint spawned for each physical Gu. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
+    /** Visual/interaction actor used to project the physical Gu into the world. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Species",
+        meta=(ExposeOnSpawn="true"))
     TSubclassOf<AWildGuWorldActor> WildGuActorClass;
 
-    /** Logical world region used by streaming/world-population systems. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
+    // ---------------------------------------------------------------------
+    // World identity
+    // ---------------------------------------------------------------------
+
+    /** Logical world region used by ecology/world-population systems. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|World",
+        meta=(ExposeOnSpawn="true"))
     FName RegionId = TEXT("World.Region.Debug");
 
     /**
-     * Stable logical id for this authored spawn site. Set this explicitly for save-stable content.
-     * If left empty, the actor path is used as a deterministic fallback.
+     * Stable authored spawn-site ID. Set this explicitly for save-stable content.
+     * If empty, the placed actor path becomes the deterministic fallback.
      */
-    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Gu|Spawner")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|World",
+        meta=(ExposeOnSpawn="true"))
     FName SpawnerId = NAME_None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner", meta=(ClampMin="1", ClampMax="64"))
+    // ---------------------------------------------------------------------
+    // Spawn layout
+    // ---------------------------------------------------------------------
+
+    /** Number of physical Gu represented by this spawn site. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Spawn",
+        meta=(ExposeOnSpawn="true", ClampMin="1", ClampMax="64", UIMin="1", UIMax="64"))
     int32 SpawnCount = 1;
 
-    /** XY radius around the actor. Zero spawns exactly at the actor transform. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner", meta=(ClampMin="0.0"))
+    /** XY radius around the spawner. Zero spawns exactly at the actor transform. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Spawn",
+        meta=(ExposeOnSpawn="true", ClampMin="0.0", UIMin="0.0"))
     float SpawnRadiusCm = 0.0f;
 
-    /** Deterministic salt combined with SpawnerId + slot index. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
+    /** Deterministic salt combined with SpawnerId and slot index. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Spawn",
+        meta=(ExposeOnSpawn="true"))
     int32 BaseSeed = 1;
 
-    /** Snap randomized spawn positions to blocking world geometry below them. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner|Placement")
+    // ---------------------------------------------------------------------
+    // Placement
+    // ---------------------------------------------------------------------
+
+    /** Snap randomized positions to blocking world geometry underneath them. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Placement",
+        meta=(ExposeOnSpawn="true"))
     bool bProjectToGround = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner|Placement", meta=(ClampMin="0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Placement",
+        meta=(ClampMin="0.0", AdvancedDisplay))
     float GroundTraceUpCm = 5000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner|Placement", meta=(ClampMin="0.0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Placement",
+        meta=(ClampMin="0.0", AdvancedDisplay))
     float GroundTraceDownCm = 20000.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
+    // ---------------------------------------------------------------------
+    // Startup
+    // ---------------------------------------------------------------------
+
+    /** Automatically reconcile/spawn this site when play begins. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Startup",
+        meta=(ExposeOnSpawn="true"))
     bool bSpawnOnBeginPlay = true;
 
-    /** Small delay lets persistent-domain/world restore complete before authored spawn reconciliation. */
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Gu|Spawner", meta=(ClampMin="0.0", ClampMax="10.0"))
+    /** Small persistence-load grace period before authored spawn reconciliation. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Spawner|Startup",
+        meta=(ClampMin="0.0", ClampMax="10.0", AdvancedDisplay))
     float InitialSpawnDelaySeconds = 0.10f;
 
-    /** Physical ids currently resolved/created by this spawner during this world session. */
+    // ---------------------------------------------------------------------
+    // Runtime state
+    // ---------------------------------------------------------------------
+
+    /** Physical entity IDs currently resolved by this spawn site. */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Gu|Spawner|Runtime")
     TArray<FGuid> SpawnedEntityIds;
 
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Gu|Spawner|Runtime")
     FString LastSpawnError;
 
-    UPROPERTY(BlueprintAssignable, Category="Gu|Spawner")
+    UPROPERTY(BlueprintAssignable, Category="Gu|Spawner|Events")
     FGuWildGuSpawnedSignature OnWildGuSpawned;
 
-    /** Reconciles every authored slot. Existing saved residents are reused rather than duplicated. */
+    /** Reconciles every authored slot. Saved residents are reused rather than duplicated. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Spawner")
     TArray<FGuid> SpawnWildGuBatch();
 
-    /** Reconciles/spawns one specific slot. */
+    /** Reconciles/spawns one specific authored slot. */
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Spawner")
     FGuid SpawnWildGuSlot(int32 SlotIndex);
 
@@ -113,7 +151,7 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Gu|Spawner")
     TObjectPtr<USceneComponent> SceneRoot;
 
-    UFUNCTION(BlueprintImplementableEvent, Category="Gu|Spawner", meta=(DisplayName="Wild Gu Spawned"))
+    UFUNCTION(BlueprintImplementableEvent, Category="Gu|Spawner|Events", meta=(DisplayName="Wild Gu Spawned"))
     void K2_OnWildGuSpawned(FGuid EntityId, AWildGuWorldActor* ProxyActor);
 
 private:

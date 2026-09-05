@@ -519,6 +519,15 @@ FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
     const FString& NewOwnerId,
     const EGuContainer TargetContainer)
 {
+    // Compatibility wrapper. Physical capture no longer grants spiritual ownership.
+    (void)TargetContainer;
+    return PhysicallyCaptureWildGu(EntityId, NewOwnerId);
+}
+
+FGuWorldCaptureResult UGuEcologyPopulationSubsystem::PhysicallyCaptureWildGu(
+    const FGuid EntityId,
+    const FString& CaptorId)
+{
     FGuWorldCaptureResult Result;
     Result.EntityId = EntityId;
 
@@ -535,15 +544,9 @@ FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
         return Result;
     }
 
-    if (NewOwnerId.IsEmpty())
+    if (CaptorId.IsEmpty())
     {
-        Result.Error = TEXT("A capture owner id is required.");
-        return Result;
-    }
-
-    if (TargetContainer == EGuContainer::World || TargetContainer == EGuContainer::Consumed)
-    {
-        Result.Error = TEXT("Captured Gu must move into Aperture, Storage, or House.");
+        Result.Error = TEXT("A physical captor id is required.");
         return Result;
     }
 
@@ -556,10 +559,10 @@ FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
         return Result;
     }
 
-    FString TransferError;
-    if (!Entities->TransferGuOwnershipAndPlacement(EntityId, NewOwnerId, TargetContainer, TransferError))
+    FString CaptureError;
+    if (!Entities->MarkGuCaptured(EntityId, CaptorId, CaptureError))
     {
-        Result.Error = TransferError;
+        Result.Error = CaptureError;
         return Result;
     }
 
@@ -567,10 +570,11 @@ FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
     {
         WorldPopulation->UnregisterWildGu(EntityId, true);
     }
-
     Residents.Remove(EntityId);
 
     Result.bSuccess = true;
+    Result.bRequiresWillRefinement = true;
+    Result.CapturedContainer = EGuContainer::Captured;
     return Result;
 }
 

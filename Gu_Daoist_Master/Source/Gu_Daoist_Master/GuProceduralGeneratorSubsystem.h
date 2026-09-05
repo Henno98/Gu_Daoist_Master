@@ -31,7 +31,7 @@ struct FProceduralGuGenerationRequest
 {
     GENERATED_BODY()
 
-    /** Must use the project path namespace, e.g. Data.Paths.Moon. */
+    /** Optional. Leave empty for deterministic Auto Path selection. Explicit paths use Data.Paths.<PathName>. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Gu|Generation", meta=(Categories="Data.Paths"))
     FGameplayTag PrimaryPath;
 
@@ -79,6 +79,14 @@ struct FProceduralGuGenerationResult
     UPROPERTY(BlueprintReadOnly, Category="Gu|Generation")
     FString Summary;
 
+    /** Canonical mechanic-type signature, useful for diversity/debug tooling. */
+    UPROPERTY(BlueprintReadOnly, Category="Gu|Generation")
+    FName StructureSignature;
+
+    /** Normalized mechanic vocabulary present on this generated species. */
+    UPROPERTY(BlueprintReadOnly, Category="Gu|Generation")
+    TArray<FName> MechanicTypes;
+
     /** True when generation resolved to an already-known canonical runtime species. */
     UPROPERTY(BlueprintReadOnly, Category="Gu|Generation")
     bool bReusedExistingSpecies = false;
@@ -97,7 +105,7 @@ struct FProceduralGuGenerationResult
  * thousands of Gu share a finite mechanic vocabulary instead of requiring one
  * hand-authored DataAsset/ability class per species.
  */
-UCLASS()
+UCLASS(BlueprintType)
 class GU_DAOIST_MASTER_API UGuProceduralGeneratorSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
@@ -108,6 +116,18 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Generation")
     bool GenerateAndGrantGu(AGu_Daoist_MasterCharacter* Character, const FProceduralGuGenerationRequest& Request, FProceduralGuGenerationResult& OutResult, FString& OutError);
+
+    /**
+     * Deterministically compiles many species without creating physical Gu instances.
+     * Intended for ecology/world-population seeding and large diversity tests.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|Generation")
+    bool GenerateSpeciesBatch(
+        const FProceduralGuGenerationRequest& BaseRequest,
+        int32 Count,
+        int32 BatchSeed,
+        TArray<FProceduralGuGenerationResult>& OutResults,
+        FString& OutError);
 
     /** Converts a refinement/runtime domain record into an executable transient UGuDefinition and registers it. */
     bool CompileAndRegisterRuntimeRecord(const FGuDefinitionRecord& SourceRecord, UGuDefinition*& OutDefinition, FString& OutError, bool bReplaceExisting = true, FName* OutCanonicalDefinitionId = nullptr);

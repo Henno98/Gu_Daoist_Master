@@ -58,20 +58,18 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category="Gu|World|Population")
     int32 RefreshWildGuHabitatRules();
-
     /**
-     * Capture = ownership/container transition of the SAME FGuid.
-     * The world proxy is removed; the physical Gu is not destroyed/re-created.
-     */
-    /**
-     * Capture preserves the physical Gu FGuid and only changes owner/container.
-     * Aperture-pressure resolution belongs to the existing player/cultivation owner,
-     * not this world-population subsystem.
+     * Legacy C++ entry point retained for source compatibility. TargetContainer
+     * is compatibility-only: capture now means physical restraint, not ownership.
      */
     FGuWorldCaptureResult CaptureWildGu(
         FGuid EntityId,
         const FString& NewOwnerId,
         EGuContainer TargetContainer = EGuContainer::Aperture);
+
+    /** Physically restrains a tracked wild Gu while preserving its FGuid. */
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|World|Population")
+    FGuWorldCaptureResult PhysicallyCaptureWildGu(FGuid EntityId, const FString& CaptorId);
 
     // WildGuSpawner v2 authored-resident bridge.
     /**

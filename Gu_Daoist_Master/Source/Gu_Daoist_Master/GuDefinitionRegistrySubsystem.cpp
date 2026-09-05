@@ -97,6 +97,52 @@ FString UGuDefinitionRegistrySubsystem::NameKey(const FString& Name)
     return Name.TrimStartAndEnd().ToLower();
 }
 
+FName UGuDefinitionRegistrySubsystem::ResolveDefinitionAlias(const FName Id) const
+{
+    FName Current = Id;
+    for (int32 Depth = 0; Depth < 8; ++Depth)
+    {
+        const FName* Next = DefinitionAliases.Find(Current);
+        if (!Next || Next->IsNone() || *Next == Current) break;
+        Current = *Next;
+    }
+    return Current;
+}
+
+void UGuDefinitionRegistrySubsystem::RetargetDefinitionIdentity(const FName OldId, const FName NewId)
+{
+    if (OldId.IsNone() || NewId.IsNone() || OldId == NewId) return;
+
+    for (TPair<FName, FName>& Alias : DefinitionAliases)
+    {
+        if (Alias.Value == OldId) Alias.Value = NewId;
+    }
+    DefinitionAliases.Add(OldId, NewId);
+
+    TObjectPtr<UGuDefinition> Asset;
+    if (AuthoredAssetsById.RemoveAndCopyValue(OldId, Asset) && Asset)
+    {
+        Asset->StableDefinitionId = NewId;
+        AuthoredAssetsById.Add(NewId, Asset);
+    }
+
+    TObjectPtr<UGuDefinition> RuntimeAsset;
+    if (RuntimeAssetsById.RemoveAndCopyValue(OldId, RuntimeAsset) && RuntimeAsset)
+    {
+        RuntimeAsset->StableDefinitionId = NewId;
+        RuntimeAssetsById.Add(NewId, RuntimeAsset);
+    }
+
+    if (RuntimeDefinitionIds.Remove(OldId) > 0)
+    {
+        RuntimeDefinitionIds.Add(NewId);
+    }
+    for (TPair<FString, FName>& Fingerprint : RuntimeIdByFingerprint)
+    {
+        if (Fingerprint.Value == OldId) Fingerprint.Value = NewId;
+    }
+}
+
 FName UGuDefinitionRegistrySubsystem::DefinitionIdForAsset(const UGuDefinition* Asset)
 {
     if (!IsValid(Asset)) return NAME_None;
@@ -879,7 +925,12 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinition(
             OutError = FString::Printf(TEXT("A Gu named '%s' already exists."), *Clean.Name);
             return false;
         }
-        if (*ExistingNameId != Clean.Id) DefinitionsById.Remove(*ExistingNameId);
+        if (*ExistingNameId != Clean.Id)
+        {
+            const FName ReplacedId = *ExistingNameId;
+            RetargetDefinitionIdentity(ReplacedId, Clean.Id);
+            DefinitionsById.Remove(ReplacedId);
+        }
     }
 
     FString NewFingerprint;
@@ -914,6 +965,10 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinition(
     else
     {
         RuntimeDefinitionIds.Remove(Clean.Id);
+        for (auto It = RuntimeIdByFingerprint.CreateIterator(); It; ++It)
+        {
+            if (It.Value() == Clean.Id) It.RemoveCurrent();
+        }
     }
     OutError.Reset();
     return true;
@@ -926,13 +981,47 @@ bool UGuDefinitionRegistrySubsystem::RegisterDefinitionAsset(
 {
     FGuDefinitionRecord Record;
     if (!BuildRecordFromAsset(Asset, Record, OutError)) return false;
-    if (!RegisterDefinition(Record, OutError, bReplaceExisting)) return false;
 
-    // Preserve the authored species bridge for systems that must execute the
-    // original UGuDefinition mechanics (GAS, projectiles, killer moves).
-    // Physical ECS state never mutates this shared DataAsset.
+    const FName ObjectId = Asset->GetFName();
+    bool bBindExistingCanonicalWithoutReplacing = false;
+
+    // An implicit object-name ID is a compatibility alias, not a reason to create
+    // a second species with the same authored display name. If that name already
+    // has a canonical species, bind this executable DataAsset to that identity.
+    if (Asset->StableDefinitionId.IsNone())
+    {
+        const FString DisplayKey = NameKey(Record.Name);
+        if (const FName* ExistingNameId = IdByName.Find(DisplayKey))
+        {
+            if (*ExistingNameId != Record.Id)
+            {
+                Record.Id = *ExistingNameId;
+                bBindExistingCanonicalWithoutReplacing = !bReplaceExisting;
+            }
+        }
+    }
+
+    if (!bBindExistingCanonicalWithoutReplacing)
+    {
+        if (!RegisterDefinition(Record, OutError, bReplaceExisting)) return false;
+    }
+    else if (!DefinitionsById.Contains(Record.Id))
+    {
+        OutError = TEXT("The canonical Gu definition disappeared while binding its authored DataAsset.");
+        return false;
+    }
+
+    // Freeze the resolved runtime identity on the UObject so all later bridges
+    // (character grant, GAS, spawners) ask for the same canonical ID. This does
+    // not save/dirty the asset package by itself.
+    UGuDefinition* MutableAsset = const_cast<UGuDefinition*>(Asset);
+    MutableAsset->StableDefinitionId = Record.Id;
+
+    DefinitionAliases.Add(ObjectId, Record.Id);
+
     RuntimeAssetsById.Remove(Record.Id);
-    AuthoredAssetsById.Add(Record.Id, const_cast<UGuDefinition*>(Asset));
+    AuthoredAssetsById.Add(Record.Id, MutableAsset);
+    OutError.Reset();
     return true;
 }
 
@@ -957,15 +1046,21 @@ bool UGuDefinitionRegistrySubsystem::RegisterRuntimeDefinitionAsset(
 
     AuthoredAssetsById.Remove(RuntimeRecord.Id);
     RuntimeAssetsById.Add(RuntimeRecord.Id, RuntimeAsset);
+    DefinitionAliases.Add(RuntimeAsset->GetFName(), RuntimeRecord.Id);
     OutError.Reset();
     return true;
 }
 
 const FGuDefinitionRecord* UGuDefinitionRegistrySubsystem::FindDefinition(const FName IdOrName) const
 {
-    if (const FGuDefinitionRecord* ById = DefinitionsById.Find(IdOrName)) return ById;
+    const FName ResolvedId = ResolveDefinitionAlias(IdOrName);
+    if (const FGuDefinitionRecord* ById = DefinitionsById.Find(ResolvedId)) return ById;
+
     const FString Key = NameKey(IdOrName.ToString());
-    if (const FName* Id = IdByName.Find(Key)) return DefinitionsById.Find(*Id);
+    if (const FName* Id = IdByName.Find(Key))
+    {
+        return DefinitionsById.Find(ResolveDefinitionAlias(*Id));
+    }
     return nullptr;
 }
 
@@ -1124,4 +1219,9 @@ void UGuDefinitionRegistrySubsystem::ClearRuntimeDefinitions()
     }
     RuntimeDefinitionIds.Reset();
     RuntimeIdByFingerprint.Reset();
+
+    for (auto It = DefinitionAliases.CreateIterator(); It; ++It)
+    {
+        if (!DefinitionsById.Contains(It.Value())) It.RemoveCurrent();
+    }
 }
