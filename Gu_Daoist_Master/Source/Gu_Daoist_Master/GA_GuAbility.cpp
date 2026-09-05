@@ -8,6 +8,7 @@
 #include "GuEntitySubsystem.h"
 #include "GuInstanceObject.h"
 #include "GuRuntimeEffectComponent.h"
+#include "GuWorldDaoEcologySubsystem.h"
 #include "Gu_Projectile.h"
 #include "UGuDefinition.h"
 
@@ -156,6 +157,20 @@ void UGA_GuAbility::ActivateAbility(
         }
     }
 
+
+    // Successful Gu use leaves environmental Dao traces.
+    // UGuWorldDaoEcologySubsystem authority-gates mutation internally.
+    if (bExecuted)
+    {
+        if (AActor* Avatar = ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr)
+        {
+            if (UGuWorldDaoEcologySubsystem* Ecology =
+                GetWorld() ? GetWorld()->GetSubsystem<UGuWorldDaoEcologySubsystem>() : nullptr)
+            {
+                Ecology->RecordGuActivation(GuDefinition, Avatar->GetActorLocation());
+            }
+        }
+    }
     UE_LOG(LogTemp, Warning, TEXT("Activated Gu: %s"), *GuDefinition->Name.ToString());
     EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 }

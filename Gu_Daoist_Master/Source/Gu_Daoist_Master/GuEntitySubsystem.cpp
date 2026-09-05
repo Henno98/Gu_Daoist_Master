@@ -585,3 +585,61 @@ void UGuEntitySubsystem::ResetAllEntities()
     MultitaskingBoosts.Reset();
     RefinementAssistants.Reset();
 }
+
+bool UGuEntitySubsystem::TransferGuOwnershipAndPlacement(
+    const FGuid EntityId,
+    const FString& NewOwnerId,
+    const EGuContainer NewContainer,
+    FString& OutError)
+{
+    if (!HasDomainAuthority())
+    {
+        OutError = TEXT("Gu ownership/placement mutations are server-authoritative.");
+        return false;
+    }
+
+    if (!GuInstances.Contains(EntityId))
+    {
+        OutError = FString::Printf(TEXT("Entity %s is not a Gu."), *EntityId.ToString());
+        return false;
+    }
+
+    FGuConditionComponent* Condition = GuConditions.Find(EntityId);
+    if (!Condition || !Condition->bAlive)
+    {
+        OutError = TEXT("A dead or missing Gu cannot be transferred.");
+        return false;
+    }
+
+    if (NewContainer == EGuContainer::Consumed)
+    {
+        OutError = TEXT("Transfer cannot place a living Gu directly into Consumed.");
+        return false;
+    }
+
+    FOwnedByComponent& Owner = Owners.FindOrAdd(EntityId);
+    FGuPlacementComponent& Placement = GuPlacements.FindOrAdd(EntityId);
+    FGuStatusComponent& Status = GuStatus.FindOrAdd(EntityId);
+
+    Owner.OwnerId = NewOwnerId;
+    Placement.Container = NewContainer;
+    Status.HolderId = NewOwnerId;
+
+    Status.States.Remove(TEXT("Wild"));
+    Status.States.Remove(TEXT("Refined / owned"));
+
+    if (NewContainer == EGuContainer::World)
+    {
+        Status.States.AddUnique(TEXT("Wild"));
+        Status.Visibility = TEXT("Public");
+    }
+    else
+    {
+        Status.States.AddUnique(TEXT("Refined / owned"));
+        Status.Visibility = TEXT("Secret");
+    }
+    Status.States.AddUnique(TEXT("Active"));
+
+    OutError.Reset();
+    return true;
+}

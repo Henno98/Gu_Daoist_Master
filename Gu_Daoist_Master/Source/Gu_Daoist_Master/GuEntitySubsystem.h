@@ -81,6 +81,16 @@ public:
     bool RestoreSnapshots(const TArray<FGuEntitySnapshot>& Snapshots, FString& OutError);
     void ResetAllEntities();
 
+
+    /**
+     * Changes ownership/container of an existing physical Gu without changing FGuid.
+     * Used by world capture, escrow and later trading.
+     */
+    bool TransferGuOwnershipAndPlacement(
+        FGuid EntityId,
+        const FString& NewOwnerId,
+        EGuContainer NewContainer,
+        FString& OutError);
 private:
     static int64 NowUnixMs();
     bool HasDomainAuthority() const;
