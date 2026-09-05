@@ -73,25 +73,6 @@ public:
         const FString& NewOwnerId,
         EGuContainer TargetContainer = EGuContainer::Aperture);
 
-    // WildGuSpawner v2 authored-resident bridge.
-    /**
-     * Registers a level-authored physical Gu as a first-class ecology resident.
-     * This preserves the same FGuid and makes normal CaptureWildGu() work.
-     * A zero-capacity metadata site is retained so save/restore retains authored
-     * population membership without letting ecology reconciliation spawn extras.
-     */
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|World|Population")
-    bool RegisterAuthoredWildGuResident(
-        FGuid EntityId,
-        FName SiteId,
-        FName RegionId,
-        FName DefinitionId,
-        int32 SlotIndex,
-        const FTransform& WorldTransform,
-        int32 SpawnSeed,
-        TSubclassOf<AWildGuWorldActor> ActorClass,
-        bool bSpawnProxy = true);
-
     UFUNCTION(BlueprintPure, Category="Gu|World|Population")
     bool GetResident(FGuid EntityId, FGuEcologyResident& OutResident) const;
 
