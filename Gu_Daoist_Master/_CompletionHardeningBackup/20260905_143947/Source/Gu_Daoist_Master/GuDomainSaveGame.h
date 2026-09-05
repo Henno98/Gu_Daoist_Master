@@ -14,7 +14,7 @@ class GU_DAOIST_MASTER_API UGuDomainSaveGame : public USaveGame
 
 public:
     UPROPERTY(SaveGame)
-    int32 SaveVersion = 2;
+    int32 SaveVersion = 1;
 
     /** Procedural/refinement-created species only. Authored DataAssets remain project content. */
     UPROPERTY(SaveGame)

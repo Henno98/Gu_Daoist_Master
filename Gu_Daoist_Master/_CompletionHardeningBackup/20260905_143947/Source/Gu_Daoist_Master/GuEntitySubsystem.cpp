@@ -105,51 +105,6 @@ FGuid UGuEntitySubsystem::CreateMaterialLot(
     Lot.SourceKind = SourceKind;
     Lot.CreatedAtUnixMs = NowUnixMs();
     MaterialLots.Add(EntityId, MoveTemp(Lot));
-    // v2 migration: legacy material inventory becomes an explicitly owned physical lot.
-    FOwnedByComponent Owner;
-    Owner.OwnerId = TEXT("player");
-    Owners.Add(EntityId, MoveTemp(Owner));
-
-    FGuPlacementComponent Placement;
-    Placement.Container = EGuContainer::Storage;
-    GuPlacements.Add(EntityId, Placement);
-    RequestPersistentSave();
-    return EntityId;
-}
-
-FGuid UGuEntitySubsystem::CreateOwnedMaterialLot(
-    const FRefinementSemanticProfile& Profile,
-    const FName Item,
-    const int32 Quantity,
-    const FName SourceKind,
-    const FGuid SourceEntityId,
-    const FString& OwnerId,
-    const EGuContainer Container)
-{
-    if (!HasDomainAuthority() || Item.IsNone() || Quantity <= 0) return FGuid();
-    if (OwnerId.IsEmpty() && Container != EGuContainer::World) return FGuid();
-
-    const FGuid EntityId = AllocateEntityId();
-    Entities.Add(EntityId);
-    AttachRefinementSemantics(EntityId, Profile, ERefinableKind::Material, Item, Item);
-
-    FMaterialLotComponent Lot;
-    Lot.LotId = FString::Printf(TEXT("lot_%s"), *EntityId.ToString(EGuidFormats::Digits));
-    Lot.Item = Item;
-    Lot.Quantity = Quantity;
-    Lot.SourceEntityId = SourceEntityId;
-    Lot.SourceKind = SourceKind;
-    Lot.CreatedAtUnixMs = NowUnixMs();
-    MaterialLots.Add(EntityId, MoveTemp(Lot));
-
-    FOwnedByComponent Owner;
-    Owner.OwnerId = OwnerId;
-    Owners.Add(EntityId, MoveTemp(Owner));
-
-    FGuPlacementComponent Placement;
-    Placement.Container = Container;
-    GuPlacements.Add(EntityId, Placement);
-
     RequestPersistentSave();
     return EntityId;
 }
@@ -169,172 +124,6 @@ bool UGuEntitySubsystem::ConsumeMaterialQuantity(const FGuid EntityId, const int
     Lot->Quantity-=Requested;
     if (Lot->Quantity<=0) DestroyEntity(EntityId);
     else RequestPersistentSave();
-    OutError.Reset();
-    return true;
-}
-
-bool UGuEntitySubsystem::SetEntityOwnershipAndContainer(
-    const FGuid EntityId,
-    const FString& OwnerId,
-    const EGuContainer Container,
-    FString& OutError)
-{
-    if (!HasDomainAuthority())
-    {
-        OutError = TEXT("Entity ownership mutations are server-authoritative.");
-        return false;
-    }
-    if (!Entities.Contains(EntityId))
-    {
-        OutError = TEXT("The selected physical entity does not exist.");
-        return false;
-    }
-    if (OwnerId.IsEmpty() && Container != EGuContainer::World)
-    {
-        OutError = TEXT("Owned/storage/escrow entities require a non-empty owner id.");
-        return false;
-    }
-
-    FOwnedByComponent Owner;
-    Owner.OwnerId = OwnerId;
-    Owners.Add(EntityId, MoveTemp(Owner));
-
-    FGuPlacementComponent Placement;
-    Placement.Container = Container;
-    GuPlacements.Add(EntityId, Placement);
-
-    RequestPersistentSave();
-    OutError.Reset();
-    return true;
-}
-
-TArray<FGuid> UGuEntitySubsystem::QueryMaterialLotsForOwner(
-    const FString& OwnerId,
-    const EGuContainer Container) const
-{
-    TArray<FGuid> Result;
-    for (const TPair<FGuid, FMaterialLotComponent>& Pair : MaterialLots)
-    {
-        const FOwnedByComponent* Owner = Owners.Find(Pair.Key);
-        const FGuPlacementComponent* Placement = GuPlacements.Find(Pair.Key);
-        if (Owner && Placement && Owner->OwnerId == OwnerId && Placement->Container == Container)
-        {
-            Result.Add(Pair.Key);
-        }
-    }
-    return Result;
-}
-
-bool UGuEntitySubsystem::MoveOrSplitMaterialLot(
-    const FGuid SourceEntityId,
-    const int32 Quantity,
-    const FString& ExpectedOwnerId,
-    const FString& DestinationOwnerId,
-    const EGuContainer DestinationContainer,
-    FGuid& OutMovedEntityId,
-    FString& OutError)
-{
-    OutMovedEntityId = FGuid();
-
-    if (!HasDomainAuthority())
-    {
-        OutError = TEXT("Material escrow mutations are server-authoritative.");
-        return false;
-    }
-
-    FMaterialLotComponent* SourceLot = MaterialLots.Find(SourceEntityId);
-    if (!SourceLot)
-    {
-        OutError = TEXT("The selected entity is not a physical material lot.");
-        return false;
-    }
-
-    FOwnedByComponent* SourceOwner = Owners.Find(SourceEntityId);
-    FGuPlacementComponent* SourcePlacement = GuPlacements.Find(SourceEntityId);
-    if (!SourceOwner || !SourcePlacement)
-    {
-        OutError = TEXT("The material lot has no physical ownership/container state.");
-        return false;
-    }
-
-    if (!ExpectedOwnerId.IsEmpty() && SourceOwner->OwnerId != ExpectedOwnerId)
-    {
-        OutError = TEXT("Material ownership changed before the escrow operation completed.");
-        return false;
-    }
-    if (DestinationOwnerId.IsEmpty() && DestinationContainer != EGuContainer::World)
-    {
-        OutError = TEXT("The destination requires a non-empty owner id.");
-        return false;
-    }
-    if (Quantity <= 0 || Quantity > SourceLot->Quantity)
-    {
-        OutError = FString::Printf(
-            TEXT("Requested material quantity %d is invalid for a lot containing %d."),
-            Quantity,
-            SourceLot->Quantity);
-        return false;
-    }
-
-    // Whole-lot transfers are identity-preserving. This is the Gu-equivalent invariant
-    // applied to material lots: escrow is a location/owner transition, not destruction.
-    if (Quantity == SourceLot->Quantity)
-    {
-        SourceOwner->OwnerId = DestinationOwnerId;
-        SourcePlacement->Container = DestinationContainer;
-        OutMovedEntityId = SourceEntityId;
-        RequestPersistentSave();
-        OutError.Reset();
-        return true;
-    }
-
-    const FRefinableEntityComponent* SourceRefinable = Refinables.Find(SourceEntityId);
-    const FDaoMarkProfileComponent* SourceDao = DaoMarks.Find(SourceEntityId);
-    if (!SourceRefinable || !SourceDao)
-    {
-        OutError = TEXT("The material lot is missing its shared refinement semantic components.");
-        return false;
-    }
-
-    FRefinementSemanticProfile Profile;
-    Profile.Paths = SourceDao->Paths;
-    Profile.DaoMass = SourceDao->DaoMass;
-    if (const FRefinementPropertiesComponent* C = RefinementProperties.Find(SourceEntityId)) Profile.Properties = C->Scores;
-    if (const FRefinementAttributesComponent* C = RefinementAttributes.Find(SourceEntityId)) Profile.Attributes = C->Scores;
-    if (const FRefinementTraitsComponent* C = RefinementTraits.Find(SourceEntityId)) Profile.Traits = C->Scores;
-    if (const FRefinementTemplatesComponent* C = RefinementTemplates.Find(SourceEntityId)) Profile.Templates = C->Scores;
-
-    const FGuid SplitEntityId = AllocateEntityId();
-    Entities.Add(SplitEntityId);
-    AttachRefinementSemantics(
-        SplitEntityId,
-        Profile,
-        SourceRefinable->Kind,
-        SourceRefinable->SourceId,
-        SourceRefinable->DefinitionId);
-
-    if (const FDaoContaminationComponent* SourceContamination = DaoContamination.Find(SourceEntityId))
-    {
-        DaoContamination.Add(SplitEntityId, *SourceContamination);
-    }
-
-    FMaterialLotComponent SplitLot = *SourceLot;
-    SplitLot.LotId = FString::Printf(TEXT("lot_%s"), *SplitEntityId.ToString(EGuidFormats::Digits));
-    SplitLot.Quantity = Quantity;
-    SplitLot.CreatedAtUnixMs = NowUnixMs();
-    MaterialLots.Add(SplitEntityId, MoveTemp(SplitLot));
-
-    FOwnedByComponent SplitOwner;
-    SplitOwner.OwnerId = DestinationOwnerId;
-    Owners.Add(SplitEntityId, MoveTemp(SplitOwner));
-
-    FGuPlacementComponent SplitPlacement;
-    SplitPlacement.Container = DestinationContainer;
-    GuPlacements.Add(SplitEntityId, SplitPlacement);
-
-    SourceLot->Quantity -= Quantity;
-    OutMovedEntityId = SplitEntityId;
-    RequestPersistentSave();
     OutError.Reset();
     return true;
 }
@@ -703,8 +492,6 @@ TArray<FGuEntitySnapshot> UGuEntitySubsystem::ExportSnapshots() const
         if (const FRefinementTraitsComponent* Found = RefinementTraits.Find(EntityId)) S.RefinementTraits = *Found;
         if (const FRefinementTemplatesComponent* Found = RefinementTemplates.Find(EntityId)) S.RefinementTemplates = *Found;
         if (const FDaoContaminationComponent* Found = DaoContamination.Find(EntityId)) { S.bHasContamination = true; S.Contamination = *Found; }
-        if (const FOwnedByComponent* Found = Owners.Find(EntityId)) { S.bHasOwner = true; S.OwnedBy = *Found; }
-        if (const FGuPlacementComponent* Found = GuPlacements.Find(EntityId)) { S.bHasPlacement = true; S.GuPlacement = *Found; }
         if (const FGuInstanceComponent* Found = GuInstances.Find(EntityId))
         {
             S.bHasGuInstance = true;
@@ -754,25 +541,6 @@ bool UGuEntitySubsystem::RestoreSnapshots(const TArray<FGuEntitySnapshot>& Snaps
             RefinementTemplates.Add(S.EntityId, S.RefinementTemplates);
         }
         if (S.bHasContamination) DaoContamination.Add(S.EntityId, S.Contamination);
-        // v2 generic ownership/placement. v1 Gu snapshots used these payloads without flags;
-        // v1 material lots had no explicit owner/container and migrate to player Storage.
-        if (S.bHasOwner) Owners.Add(S.EntityId, S.OwnedBy);
-        else if (S.bHasGuInstance) Owners.Add(S.EntityId, S.OwnedBy);
-        else if (S.bHasMaterialLot)
-        {
-            FOwnedByComponent MigratedOwner;
-            MigratedOwner.OwnerId = TEXT("player");
-            Owners.Add(S.EntityId, MoveTemp(MigratedOwner));
-        }
-
-        if (S.bHasPlacement) GuPlacements.Add(S.EntityId, S.GuPlacement);
-        else if (S.bHasGuInstance) GuPlacements.Add(S.EntityId, S.GuPlacement);
-        else if (S.bHasMaterialLot)
-        {
-            FGuPlacementComponent MigratedPlacement;
-            MigratedPlacement.Container = EGuContainer::Storage;
-            GuPlacements.Add(S.EntityId, MigratedPlacement);
-        }
         if (S.bHasGuInstance)
         {
             GuInstances.Add(S.EntityId, S.GuInstance);

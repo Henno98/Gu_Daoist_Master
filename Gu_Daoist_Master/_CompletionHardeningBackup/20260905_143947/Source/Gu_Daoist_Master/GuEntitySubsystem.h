@@ -16,43 +16,6 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
     FGuid CreateMaterialLot(const FRefinementSemanticProfile& Profile, FName Item, int32 Quantity, FName SourceKind, FGuid SourceEntityId);
-    /** Creates a physical material lot with explicit ownership/container state. */
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
-    FGuid CreateOwnedMaterialLot(
-        const FRefinementSemanticProfile& Profile,
-        FName Item,
-        int32 Quantity,
-        FName SourceKind,
-        FGuid SourceEntityId,
-        const FString& OwnerId,
-        EGuContainer Container = EGuContainer::Storage);
-
-    /** Moves any physical domain entity without changing its FGuid. */
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
-    bool SetEntityOwnershipAndContainer(
-        FGuid EntityId,
-        const FString& OwnerId,
-        EGuContainer Container,
-        FString& OutError);
-
-    /**
-     * Moves a full material lot or physically splits a partial lot.
-     * Full-lot moves retain SourceEntityId; partial moves produce one new physical FGuid.
-     */
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
-    bool MoveOrSplitMaterialLot(
-        FGuid SourceEntityId,
-        int32 Quantity,
-        const FString& ExpectedOwnerId,
-        const FString& DestinationOwnerId,
-        EGuContainer DestinationContainer,
-        FGuid& OutMovedEntityId,
-        FString& OutError);
-
-    TArray<FGuid> QueryMaterialLotsForOwner(
-        const FString& OwnerId,
-        EGuContainer Container) const;
-
 
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Gu|ECS")
     FGuid CreateGuInstance(FName DefinitionId, const FString& OwnerId, EGuContainer Container = EGuContainer::Aperture);
@@ -100,9 +63,6 @@ public:
     FGuVisualStateComponent* GetMutableGuVisualState(FGuid EntityId) { return GuVisualStates.Find(EntityId); }
     const FGuPlacementComponent* GetGuPlacement(FGuid EntityId) const { return GuPlacements.Find(EntityId); }
     FGuPlacementComponent* GetMutableGuPlacement(FGuid EntityId) { return GuPlacements.Find(EntityId); }
-    /** Generic alias; the underlying placement map keeps its legacy name for source compatibility. */
-    const FGuPlacementComponent* GetEntityPlacement(FGuid EntityId) const { return GuPlacements.Find(EntityId); }
-    FGuPlacementComponent* GetMutableEntityPlacement(FGuid EntityId) { return GuPlacements.Find(EntityId); }
     const FOwnedByComponent* GetOwnedBy(FGuid EntityId) const { return Owners.Find(EntityId); }
     const FGuChargesComponent* GetGuCharges(FGuid EntityId) const { return GuCharges.Find(EntityId); }
     FGuChargesComponent* GetMutableGuCharges(FGuid EntityId) { return GuCharges.Find(EntityId); }

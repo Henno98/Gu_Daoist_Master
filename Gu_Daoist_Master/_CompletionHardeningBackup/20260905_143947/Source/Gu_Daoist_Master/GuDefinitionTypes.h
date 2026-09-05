@@ -47,8 +47,7 @@ enum class EGuContainer : uint8
     House,
     World,
     Consumed
-,
-    Escrow};
+};
 
 UENUM(BlueprintType)
 enum class ERefinableKind : uint8

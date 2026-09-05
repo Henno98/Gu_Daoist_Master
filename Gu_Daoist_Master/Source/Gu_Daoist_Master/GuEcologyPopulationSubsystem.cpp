@@ -1,6 +1,5 @@
 #include "GuEcologyPopulationSubsystem.h"
 
-#include "ApertureComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
@@ -518,7 +517,6 @@ int32 UGuEcologyPopulationSubsystem::RefreshWildGuHabitatRules()
 FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
     const FGuid EntityId,
     const FString& NewOwnerId,
-    UApertureComponent* Aperture,
     const EGuContainer TargetContainer)
 {
     FGuWorldCaptureResult Result;
@@ -549,12 +547,6 @@ FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
         return Result;
     }
 
-    if (TargetContainer == EGuContainer::Aperture && !Aperture)
-    {
-        Result.Error = TEXT("An ApertureComponent is required when capturing directly into the aperture.");
-        return Result;
-    }
-
     UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
     UGuEntitySubsystem* Entities = GI ? GI->GetSubsystem<UGuEntitySubsystem>() : nullptr;
     UGuWorldPopulationSubsystem* WorldPopulation = GetWorld() ? GetWorld()->GetSubsystem<UGuWorldPopulationSubsystem>() : nullptr;
@@ -577,12 +569,6 @@ FGuWorldCaptureResult UGuEcologyPopulationSubsystem::CaptureWildGu(
     }
 
     Residents.Remove(EntityId);
-
-    if (TargetContainer == EGuContainer::Aperture)
-    {
-        const FAperturePressureSnapshot Pressure = Aperture->ResolveAperturePressure();
-        Result.bApertureRuptured = Pressure.bRuptured;
-    }
 
     Result.bSuccess = true;
     return Result;

@@ -85,7 +85,7 @@ bool UGuPersistenceSubsystem::EnsureLoaded(FString& OutError)
         return false;
     }
 
-    if (Save->SaveVersion > 2)
+    if (Save->SaveVersion > 1)
     {
         bIsLoading = false;
         OutError = FString::Printf(TEXT("Gu-domain save version %d is newer than this build supports."), Save->SaveVersion);
@@ -228,7 +228,7 @@ bool UGuPersistenceSubsystem::SaveNow(FString& OutError)
         return false;
     }
 
-    Save->SaveVersion = 2;
+    Save->SaveVersion = 1;
     Save->RuntimeDefinitions = Registry->GetRuntimeDefinitions();
     Save->EntitySnapshots = Entities->ExportSnapshots();
     Save->SavedAtUnixMs = FDateTime::UtcNow().ToUnixTimestamp() * 1000ll;

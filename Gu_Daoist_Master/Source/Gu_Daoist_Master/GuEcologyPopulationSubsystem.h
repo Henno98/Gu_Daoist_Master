@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "GuEcologyPopulationTypes.h"
-#include "ApertureComponent.h"
 #include "GuEcologyPopulationSubsystem.generated.h"
 
 class UGuWorldDaoEcologySubsystem;
@@ -64,11 +63,14 @@ public:
      * Capture = ownership/container transition of the SAME FGuid.
      * The world proxy is removed; the physical Gu is not destroyed/re-created.
      */
-    UFUNCTION(BlueprintCallable, Category="Gu|World|Population")
+    /**
+     * Capture preserves the physical Gu FGuid and only changes owner/container.
+     * Aperture-pressure resolution belongs to the existing player/cultivation owner,
+     * not this world-population subsystem.
+     */
     FGuWorldCaptureResult CaptureWildGu(
         FGuid EntityId,
         const FString& NewOwnerId,
-        UApertureComponent* Aperture,
         EGuContainer TargetContainer = EGuContainer::Aperture);
 
     UFUNCTION(BlueprintPure, Category="Gu|World|Population")

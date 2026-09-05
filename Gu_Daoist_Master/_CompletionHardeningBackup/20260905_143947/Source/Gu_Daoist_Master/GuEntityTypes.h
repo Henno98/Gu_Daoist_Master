@@ -345,13 +345,6 @@ struct FGuEntitySnapshot
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     FDaoContaminationComponent Contamination;
 
-    /** Entity-wide ownership/placement flags added in physical-domain save v2. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
-    bool bHasOwner = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
-    bool bHasPlacement = false;
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
     bool bHasGuInstance = false;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
